@@ -35,7 +35,7 @@ class Council:
         
         # Spawn judges
         self.judges = []
-        for _ in range(2):#####
+        for _ in range(1):#####
             judge = Judge()
             self.judges.append(judge)
 
@@ -55,7 +55,7 @@ class Council:
         ''' Generate ideas from each member of the council '''
         if len(self.current_ideas) == 0:
             for id, member in self.members.items():
-                for i in range(5):
+                for i in range(1):
                     idea = member['for_agent'].idea_gen(self.topic)
                     print(idea)
                     self.current_ideas.append(idea)
@@ -169,7 +169,15 @@ class Judge(Council):
     def __init__(self):
         self.temp = 0.3
         self.scores = []
-        self.intended_use = 'Simple Parsimonious Trading Strategy'
+        self.intended_use = 'A low to medium frequency algorithmic trading strategy. We will be trading stocks on the Nasdaq. Try to use at least 2-3 different types and sources of data. Here is the data we have available in the form of a dictionary: \
+        {US Equity Security Master: Corporate action data source for splits; dividends; mergers; acquisitions; IPOs; and delistings, \
+        Bitcoin Metadata: Bitcoin processing fundamental data such as hash rate; miner revenue and number of transactions, \
+        Data Link dataset by Nasdaq: Data on Nasdaq companies, \
+        Treasury: US Daily Treasury Yield Rates, \
+        US Energy Info: Supply and demand information for US Crude Products, \
+        US Federal Reserve: FRED Economic Datasets, \
+        US Fundamental Data: Corporate Fundamental Data for fine universe selection based on industry classification and underlying company performance indicators, \
+        US Futures Security Master: Rolling reference data for popular CME Futures contracts}'
 
     def pass_judgement(self, topic, idea, for_arg, opp_arg):
         ''' Pass judgement on the quality of the idea '''
