@@ -1,3 +1,8 @@
+'''
+Title: AI Council
+Author: James McBurnie
+Github Link: https://github.com/SurvivingJ/AI-Council-Ideas-Debate
+'''
 import openai
 from enum import Enum
 import csv
