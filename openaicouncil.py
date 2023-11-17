@@ -1,4 +1,13 @@
+<<<<<<< HEAD
 from openai import OpenAI
+=======
+'''
+Title: AI Council
+Author: James McBurnie
+Github Link: https://github.com/SurvivingJ/AI-Council-Ideas-Debate
+'''
+import openai
+>>>>>>> 79df2b3259772d79ef5eca94628112422b8b569c
 from enum import Enum
 import csv
 import nltk
@@ -232,8 +241,22 @@ class Judge(Council):
 class CouncilMember(Council):
     def __init__(self, assis_id, thread_id, side):
         self.side = side
+<<<<<<< HEAD
         self.assis_id = assis_id
         self.thread_id = thread_id
+=======
+        self.profession = profession
+        self.primer = primer
+        self.intended_use = 'A low to medium frequency algorithmic trading strategy. We will be trading stocks on the Nasdaq. Try to use at least 2-3 different types and sources of data. Here is the data we have available in the form of a dictionary: \
+        {US Equity Security Master: Corporate action data source for splits; dividends; mergers; acquisitions; IPOs; and delistings, \
+        Bitcoin Metadata: Bitcoin processing fundamental data such as hash rate; miner revenue and number of transactions, \
+        Data Link dataset by Nasdaq: Data on Nasdaq companies, \
+        Treasury: US Daily Treasury Yield Rates, \
+        US Energy Info: Supply and demand information for US Crude Products, \
+        US Federal Reserve: FRED Economic Datasets, \
+        US Fundamental Data: Corporate Fundamental Data for fine universe selection based on industry classification and underlying company performance indicators, \
+        US Futures Security Master: Rolling reference data for popular CME Futures contracts}'
+>>>>>>> 79df2b3259772d79ef5eca94628112422b8b569c
 
     def create_arg(self, topic, idea):
         ''' Create arguments for the idea '''
