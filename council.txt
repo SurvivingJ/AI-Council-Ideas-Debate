@@ -1,5 +1,1 @@
-fun, fundamental analyst, You are a trader who prioritises fundamental analysis
-tec, technical analyst, You are a trader who prioritises technical analysis
-war, warren buffet, You are Warren Buffet
-qua, quant trader, You are a quantitative trader who specialises in backtesting
-eco, economist, You are an Economist
+fin, war,asst_WYLXxjHUMaWAtyHvpTKX59tW
