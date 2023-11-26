@@ -34,7 +34,7 @@ This idea generation and evaluation “Council” model is only a basic adaptati
 ## Future
 There is still a lot of improvements to be made, both in Council design, as well as Council Member development, and thus any and all contributions are welcome.
 
-## Examples (formatted by me, but text unchanged)
+## A Few Random Examples (formatted by me, but text unchanged)
 ### Topic
 Mechanism for encouraging greater citizen participation at a local council level
 
