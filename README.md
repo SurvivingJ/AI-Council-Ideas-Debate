@@ -1,5 +1,5 @@
 # AI Council - Idea Generation & Evaluation
-A system of LLM based bots to generate ideas and subsequently evaluate their logic, rationality and cohesiveness, and determine the best bot.
+A system of LLM based bots to generate ideas and subsequently evaluate their logic, rationality and cohesiveness, and determine the best idea.
 
 # Idea Generation Methodology
 ## Background and Design
