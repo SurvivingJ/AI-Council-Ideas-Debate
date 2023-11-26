@@ -1,13 +1,4 @@
-<<<<<<< HEAD
 from openai import OpenAI
-=======
-'''
-Title: AI Council
-Author: James McBurnie
-Github Link: https://github.com/SurvivingJ/AI-Council-Ideas-Debate
-'''
-import openai
->>>>>>> 79df2b3259772d79ef5eca94628112422b8b569c
 from enum import Enum
 import csv
 import nltk
@@ -22,36 +13,204 @@ class Side(Enum):
     AGAINST = 1
 
 class Council:
-    def __init__(self, topic):
+    def __init__(self, topic, model):
+        # Determine what model and tools will be used
+        if model == '':
+            self.model = "gpt-4-1106-preview"
+            self.extras_enabled_bool = True
+        else:
+            self.model = model
+            self.extras_enabled_bool = False
+
+        # API Key
         self.api_key = os.environ.get("OPENAI_AI_COUNCIL_KEY")
         if self.api_key is None:
             raise ValueError("Secret key not set in environment variables.")
+        self.client = OpenAI(api_key=self.api_key)
+        
         self.current_ideas = []
 
-        self.client = OpenAI(api_key=self.api_key)
         # Topic
         self.topic = topic
-        
+
+        # Filter Keyword(s)
+        self.keyword_and_cond = True
+        keywords=self.filter_members()
+
         # Sentiment Analysis
         nltk.download('vader_lexicon')
         
         # Spawn members
         self.members = {}
-        with open("council.txt.", 'r') as f:
-            for line in f:
-                info = line.strip()
-                csv_values = info.split(',')
-                assis_id = csv_values[2]
-                for_thread = self.client.beta.threads.create()
-                opp_thread = self.client.beta.threads.create()
-                self.members[csv_values[0]] = {'assis_id': assis_id, 'for_agent': CouncilMember(assis_id, for_thread, Side.FOR), 'opp_agent': CouncilMember(assis_id, opp_thread, Side.AGAINST)}
+        assistants = self.member_creation(self.model, keywords)
+        for assistant in assistants:
+            for_thread = self.client.beta.threads.create()
+            opp_thread = self.client.beta.threads.create()
+            self.members[assistant.id] = {'assistant': assistant, 'for_agent': CouncilMember(assistant, for_thread, Side.FOR), 'opp_agent': CouncilMember(assistant, opp_thread, Side.AGAINST)}
         
         # Spawn judges
         self.judges = []
         for _ in range(1):#####
-            thread_id = self.client.beta.threads.create()
-            judge = Judge('asst_AykIYwVycEedcLYLxYccVPvo', thread_id)
+            thread = self.client.beta.threads.create()
+            judge_assistant = self.member_creation(self.model, ['judge'])
+            judge = Judge(judge_assistant[0], thread)
             self.judges.append(judge)
+    
+    def filter_members(self):
+        ''' Determine what tags to filter by '''
+        with open('master_tags.txt', 'r') as f:
+            tags = [tag.strip() for tag in f.read().split(',')]
+        
+        while True:
+            filter_opt = input("Would you like to filter by requiring members to have all tags? Repond y or n ")
+
+            if filter_opt == 'y':
+                self.keyword_and_cond = True
+                break
+            elif filter_opt == 'n':
+                self.keyword_and_cond = False
+                break
+            else:
+                print("Invalid Input")
+        
+        print("Here is a list of all available tags")
+        for i, tag in enumerate(tags):
+            print(f"{i}: {tag}")
+
+        selected_opts = []
+        while True:
+            selected_opt = input("Which tags would you like to filter by? Please type the number")
+
+            if selected_opt not in selected_opts:
+                try:
+                    selected_opts.append(int(selected_opt))
+                except:
+                    print("Please respond with a number")
+                    continue
+                cont = input("Would you like to add more? Respond y or n ")
+                if cont == "y":
+                    continue
+                else:
+                    break
+        
+        selected_tags = []
+        for opt in selected_opts:
+            selected_tags.append(tags[opt])
+        
+        return selected_tags
+
+    def member_creation(self, model, keywords = []):
+        ''' Create an OpenAI Assistant based on information in the selected member's folder '''
+        assistants = []
+        try:
+            # Get all entries in the directory
+            entries = os.listdir('CouncilMembers')
+
+            # Filter out and keep only folders
+            folder_names = [os.path.join('CouncilMembers', entry) for entry in entries if os.path.isdir(os.path.join('CouncilMembers', entry))]
+        except FileNotFoundError:
+            # If the directory is not found, print an error message and return an empty list
+            print(f"Directory CouncilMembers not found.")
+            return []
+        
+        for folder in folder_names:
+            instructions, file_names = self.read_assistant_data(folder, keywords)
+            if instructions:
+                if model == "gpt-4-1106-preview":
+                    member = self.create_assistant(instructions, file_names)
+                else:
+                    member = self.create_assistant(instructions, file_names, tools=[], model=model)
+                assistants.append(member)
+        
+        return assistants
+    
+    def read_assistant_data(self, directory, keywords):
+        ''' Read Assistant data from relevant folders '''
+        # Step 1: Read 'info.txt' to check for the keyword
+        try:
+            with open(f'{directory}/info.txt', 'r') as file:
+                info_content = file.read()
+        except FileNotFoundError:
+            print("The file 'info.txt' was not found.")
+            return None, []
+
+        # Step 2: Check if the keyword is in 'info.txt'
+        if self.keyword_and_cond:
+            if all(keyword in info_content for keyword in keywords):
+                # Step 3: Extract text from 'information.txt'
+                try:
+                    with open(f'{directory}/instructions.txt', 'r') as file:
+                        instructions = file.read()
+                except FileNotFoundError:
+                    print("The file 'information.txt' was not found.")
+                    return None, []
+            elif len(keywords) == 0:
+                # Step 3: Extract text from 'information.txt'
+                try:
+                    with open(f'{directory}/instructions.txt', 'r') as file:
+                        instructions = file.read()
+                except FileNotFoundError:
+                    print("The file 'information.txt' was not found.")
+                    return None, []
+            else:
+                print(f"Keywords '{keywords}' not found in 'info.txt'.")
+                return None, []
+        else:
+            if any(keyword in info_content for keyword in keywords):
+                # Step 3: Extract text from 'information.txt'
+                try:
+                    with open(f'{directory}/instructions.txt', 'r') as file:
+                        instructions = file.read()
+                except FileNotFoundError:
+                    print("The file 'information.txt' was not found.")
+                    return None, []
+            elif len(keywords) == 0:
+                # Step 3: Extract text from 'information.txt'
+                try:
+                    with open(f'{directory}/instructions.txt', 'r') as file:
+                        instructions = file.read()
+                except FileNotFoundError:
+                    print("The file 'information.txt' was not found.")
+                    return None, []
+            else:
+                print(f"Keywords '{keywords}' not found in 'info.txt'.")
+                return None, []
+            
+        # Step 4: Create a list of file names in the specified directory
+        try:
+            file_dir = directory + '/Files'
+            file_names = [os.path.join(file_dir, file) for file in os.listdir(file_dir)]
+        except FileNotFoundError:
+            print(f"Directory '{directory}' not found.")
+            return instructions, []
+        
+        return instructions, file_names
+        
+    def create_assistant(self, instructions, files, tools=[{"type": "retrieval"}], model="gpt-4-1106-preview"):
+        ''' OpenAI Assistant creation API calls '''
+        if self.extras_enabled_bool:
+            # Upload a file with an "assistants" purpose
+            file_ids = []
+            for file in files:
+                file = self.client.files.create(
+                file=open(file, "rb"),
+                purpose='assistants'
+                )
+                file_ids.append(file.id)
+
+            # Create an assistant using the file ID
+            assistant = self.client.beta.assistants.create(
+            instructions=instructions,
+            model=model,
+            tools=tools,
+            file_ids=file_ids
+            )
+        else:
+            assistant = self.client.beta.assistants.create(
+            instructions=instructions,
+            model=model
+            )
+        return assistant
 
     def write_log(self, content, filename='logs.txt'):
         ''' Write into a text file '''
@@ -107,8 +266,13 @@ class Council:
         best_idea_str = json.dumps(best_idea)
         self.write_log(best_score, 'best_option.txt')
         self.write_log(best_idea_str, 'best_option.txt')
+        print("================")
+        print("BEST OPTION:")
+        print(best_idea_str)
+        print("================")
 
     def wait_on_run(self, run, thread):
+        ''' Wait for response from OpenAI API '''
         while run.status == "queued" or run.status == "in_progress":
             run = council.client.beta.threads.runs.retrieve(
                 thread_id=thread.id,
@@ -117,28 +281,32 @@ class Council:
             time.sleep(0.5)
         return run
 
-    def submit_message(self, assistant_id, thread, user_message):
+    def submit_message(self, assistant, thread, user_message):
+        ''' Submit message to OpenAI API '''
         council.client.beta.threads.messages.create(
             thread_id=thread.id, role="user", content=user_message
         )
         return council.client.beta.threads.runs.create(
             thread_id=thread.id,
-            assistant_id=assistant_id,
+            assistant_id=assistant.id,
         )
     
     def get_response(self, thread):
+        ''' Get response from OpenAI API '''
         return council.client.beta.threads.messages.list(thread_id=thread.id, order="asc")
     
     def parse_response(self, response):
+        ''' Parse OpenAI API response '''
         messages = []
         for thread_message in response.data:
             for content in thread_message.content:
                     message_text = content.text.value
                     messages.append(message_text)
         return messages
-    def generate(self, prompt, assis_id, thread):
+    
+    def generate(self, prompt, assistant, thread):
         ''' Model call to OpenAI '''
-        run = self.submit_message(assis_id, thread, prompt)
+        run = self.submit_message(assistant, thread, prompt)
         run_result = self.wait_on_run(run, thread)
 
         response = self.get_response(thread)
@@ -199,10 +367,10 @@ class Council:
         return score
 
 class Judge(Council):
-    def __init__(self, assis_id, thread_id):
+    def __init__(self, assistant, thread):
         self.scores = []
-        self.assis_id = assis_id
-        self.thread_id = thread_id
+        self.assistant = assistant
+        self.thread = thread
 
     def pass_judgement(self, topic, idea, for_arg, opp_arg):
         ''' Pass judgement on the quality of the idea '''
@@ -212,8 +380,8 @@ class Judge(Council):
         opp_prompt = f"Pass judgement on the following argument. The topic is {topic} and the idea is {idea}. \
                   The opp argument is {opp_arg}."
 
-        for_response = self.generate(for_prompt, self.assis_id, self.thread_id)
-        opp_response = self.generate(opp_prompt, self.assis_id, self.thread_id)
+        for_response = self.generate(for_prompt, self.assistant, self.thread)
+        opp_response = self.generate(opp_prompt, self.assistant, self.thread)
 
         self.write_log(for_response)
         self.write_to_csv(for_response)
@@ -239,24 +407,10 @@ class Judge(Council):
         return for_score, opp_score, for_response, opp_response
 
 class CouncilMember(Council):
-    def __init__(self, assis_id, thread_id, side):
+    def __init__(self, assistant, thread, side):
         self.side = side
-<<<<<<< HEAD
-        self.assis_id = assis_id
-        self.thread_id = thread_id
-=======
-        self.profession = profession
-        self.primer = primer
-        self.intended_use = 'A low to medium frequency algorithmic trading strategy. We will be trading stocks on the Nasdaq. Try to use at least 2-3 different types and sources of data. Here is the data we have available in the form of a dictionary: \
-        {US Equity Security Master: Corporate action data source for splits; dividends; mergers; acquisitions; IPOs; and delistings, \
-        Bitcoin Metadata: Bitcoin processing fundamental data such as hash rate; miner revenue and number of transactions, \
-        Data Link dataset by Nasdaq: Data on Nasdaq companies, \
-        Treasury: US Daily Treasury Yield Rates, \
-        US Energy Info: Supply and demand information for US Crude Products, \
-        US Federal Reserve: FRED Economic Datasets, \
-        US Fundamental Data: Corporate Fundamental Data for fine universe selection based on industry classification and underlying company performance indicators, \
-        US Futures Security Master: Rolling reference data for popular CME Futures contracts}'
->>>>>>> 79df2b3259772d79ef5eca94628112422b8b569c
+        self.assistant = assistant
+        self.thread = thread
 
     def create_arg(self, topic, idea):
         ''' Create arguments for the idea '''
@@ -266,7 +420,7 @@ class CouncilMember(Council):
             keyword = "rebutt against"
 
         prompt = f"Here is the topic: {topic}. Given your expertise and document knowledge, generate a {keyword} {idea}. Be Concise."
-        response = self.generate(prompt, self.assis_id, self.thread_id)
+        response = self.generate(prompt, self.assistant, self.thread)
         self.write_log(f"Arg: {self.side}")
         self.write_log(response)
         self.write_to_csv(f'Arg: {self.side}')
@@ -277,7 +431,7 @@ class CouncilMember(Council):
         ''' Rebut argument '''
         prompt = f"Given the topic {topic} and the idea of {idea}, you operate on the {self.side} side of the debate. Generate a creative unique rebuttal \
                   using your expert knowledge in order to rebut the following argument. Ensure it is concise. Argument: {arg}"
-        response = self.generate(prompt, self.assis_id, self.thread_id)
+        response = self.generate(prompt, self.assistant, self.thread)
         self.write_log(f"Rebuttal: {self.side}")
         self.write_log(response)
         return response
@@ -285,7 +439,7 @@ class CouncilMember(Council):
     def idea_gen(self, topic):
         ''' Generate ideas '''
         prompt = f"Given the topic: {topic} generate a unique, interesting idea drawing upon your expert knowledge, perspective and uploaded documents."
-        idea = self.generate(prompt, self.assis_id, self.thread_id)
+        idea = self.generate(prompt, self.assistant, self.thread)
         self.write_log("Idea:")
         self.write_log(idea)
         self.write_to_csv('Idea:')
@@ -296,5 +450,7 @@ class CouncilMember(Council):
 if __name__ == "__main__":
     # Create the council and begin the idea generating process
     topic = input("Topic of interest: ")
-    council = Council(topic)
+    #model = input("What model will you use? ")
+    model = 'gpt-3.5-turbo'
+    council = Council(topic, model)
     council.gen_ideas()

@@ -1,0 +1,5 @@
+Background Info:
+Amos Tversky, an Israeli cognitive and mathematical psychologist, was a key figure in the development of cognitive biases and prospect theory, along with Daniel Kahneman. His work has had a profound impact on economics, psychology, and decision sciences.
+
+Prompting:
+Use Tversky's research on heuristic and biases in decision-making. Discuss how people make choices in uncertain situations, the implications of heuristics for economic behavior, and the deviations from traditional rational choice models.

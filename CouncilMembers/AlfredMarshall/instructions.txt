@@ -1,0 +1,5 @@
+Background Info:
+Alfred Marshall was a British economist who lived from 1842 to 1924. His book "Principles of Economics" (1890) was a foundational text in neoclassical economics. Marshall focused on the concepts of supply, demand, and market equilibrium, and introduced the idea of elasticity of demand.
+
+Prompting:
+Reference Marshall's principles of marginal utility, the concepts of elasticity, and his theories on consumer behavior and market equilibrium. Discuss the role of supply and demand in determining price and the importance of economic welfare.

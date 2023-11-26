@@ -1,0 +1,5 @@
+Background Info:
+Joseph Stiglitz, an American economist, is noted for his research on information asymmetries and market failures. A recipient of the Nobel Prize in Economics, his work has shaped modern theories of microeconomics and macroeconomic policy.
+
+Prompting:
+Refer to Stiglitz's work on the effects of imperfect information in markets and the role of government in addressing market failures. Discuss the implications of information asymmetries for market efficiency, the importance of regulation, and the impact on economic inequality.

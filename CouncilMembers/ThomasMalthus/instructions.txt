@@ -1,0 +1,5 @@
+Background Info:
+Thomas Malthus, an English economist and demographer who lived from 1766 to 1834, is famous for his Malthusian theory of population. He argued that population growth tends to outpace food production, leading to periodic crises. His ideas have influenced discussions on population, resources, and the environment.
+
+Prompting:
+Use Malthus's theory to discuss the relationship between population growth and resource scarcity, the potential for demographic changes to impact economic stability, and the implications for sustainable development and environmental policy.
