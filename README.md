@@ -30,6 +30,7 @@ This idea generation and evaluation “Council” model is only a basic adaptati
 - Expand the Member templates so that an inbuilt array of “social simulacra” are available and already finetuned [**Progress Made**]
 - Introduce functionality so that one can filter based on field or person, and overall utilise a greater range of perspectives [**Can now filter based on field**]
 - Create a clearer structure and cleaner data output
+- A GUI
 
 ## Future
 There is still a lot of improvements to be made, both in Council design, as well as Council Member development, and thus any and all contributions are welcome.
