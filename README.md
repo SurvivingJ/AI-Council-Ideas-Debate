@@ -1,4 +1,4 @@
-# AI-Council-Ideas-Debate
+# AI Council - Idea Generation & Evaluation
 A system of LLM based bots to generate ideas and subsequently evaluate their logic, rationality and cohesiveness, and determine the best bot.
 
 # Idea Generation Methodology
@@ -13,23 +13,26 @@ The Council is composed of Members and Judges. Each Member is imbued with a simu
 
 The speed at which relatively strong debate on the generated ideas was conducted was impressive, and far beyond the realm of human capabilities, even when the Council program, as well as LLM processing speeds and costs, are at their most primitive, relative to their future potential.
 
+## Assistants
+With the introduction of Assistants, many of the planned improvements have become infinitely easier. Users can choose to use whichever model they want, however the choices are essentially between ‘gpt-4-1106-preview’ and ‘gpt-3.5-turbo’. Regardless of model choice, a new instance of each Assistant is created, they are prompted to guide their ‘simulacra’, and then these Assistants are accessible as objects in a dictionary. Each ‘For’ and ‘Against’ Council member will have its own memory of ideas it generated and arguments it has made, hopefully reducing repetition in their own arguments. If ‘gpt-4-1106-preview’ is chosen, then select Council members are also given a knowledge base which they can draw upon. For “Warren Buffet” it is a compilation of his shareholder letters, as well as the first edition of The Intelligent Investor by Benjamin Graham, while for John Maynard Keynes, it is his “The General Theory of Employment, Interest, and Money”. As the financial cost and efficiency of these services move quickly in a more enabling direction, eventually we may be able to use extremely high quality simulacras in all runs of the Council.
+
 ## Limitations
-The main limitation of the implementation of this idea was both API call costs, as well as API request throttling from OpenAI, which limited the number of agents I could use and the number of ideas I could evaluate. I also experimented with using smaller, local LLMs such as the GPT4All Falcon model. However, while the quality of the responses were noticeably, but not remarkably, different, it was the extremely long processing time per response that inhibited our use of a free local model. Instead of the 10-15 minutes it took using OpenAI, it is estimated that it would have taken us at minimum a day. In short local tests, however, I found that the extended processing time occasionally led to timeout errors, and thus a day-long test would likely have been impossible to perform. Furthermore, the primitive nature of the program means that I have not been able to obtain as much value from the Council as I may in the future.
+The main limitation of the implementation of this idea was both API call costs, as well as API request throttling from OpenAI, which initially limited the number of agents I could use and the number of ideas I could evaluate [**This seems no longer to be a problem with the advent of Assistants, as I do not call to each Council Member often, but initially was making every call through the Chat Completion point**]. I also experimented with using smaller, local LLMs such as the GPT4All Falcon model. However, while the quality of the responses were noticeably, but not remarkably, different, it was the extremely long processing time per response that inhibited my use of a free local model. Instead of the 10-15 minutes it took using OpenAI, it is estimated that it would have taken us at minimum a day. In short local tests, however, I found that the extended processing time occasionally led to timeout errors, and thus a day-long test would likely have been impossible to perform. Furthermore, the primitive nature of the program means that I have not been able to obtain as much value from the Council as I may in the future. [**Moreover, the introduction of Assistants is a massive step forward in the capabilities of the Council, which I do not know of being available (as of yet) in GPT4All**].
 
 While there appears to be some increase in the quality of output from using the ‘gpt-4-1106-preview’ model, for USD$30 I was unable even to finish a run that took me USD$2 using ‘gpt-3.5-turbo’. Additionally, the whole ‘gpt-3.5-turbo’ run finished significantly quicker than ‘gpt-4-1106-preview’ would have, finishing even before I stopped the more advanced model. Thus, given disparities in financial cost and efficiency, I recommend using the ‘gpt-3.5-turbo’ model. While the ideas generated or arguments made may not be as high in quality, the ‘gpt-3.5-turbo’ model is still excellent to serve the Council’s purpose.
 
 Another limitation of using the ‘gpt-4-1106-preview’ model is the need for written work by the Member to use as a knowledge base. With many incredible researchers and thinkers still alive, their work has not entered public domain, and is often locked behind paywalls, which is another limitation of using the advanced model for the Council at this time.
 
-## Assistants
-With the introduction of Assistants, many of the planned improvements have become infinitely easier. Users can choose to use whichever model they want, however the choices are essentially between ‘gpt-4-1106-preview’ and ‘gpt-3.5-turbo’. Regardless of model choice, a new instance of each Assistant is created, they are prompted to guide their ‘simulacra’, and then these Assistants are accessible as objects in a dictionary. Each ‘For’ and ‘Against’ Council member will have its own memory of ideas it generated and arguments it has made, hopefully reducing repetition in their own arguments. If ‘gpt-4-1106-preview’ is chosen, then select Council members are also given a knowledge base which they can draw upon. For “Warren Buffet” it is a compilation of his shareholder letters, as well as the first edition of The Intelligent Investor by Benjamin Graham, while for John Maynard Keynes, it is his “The General Theory of Employment, Interest, and Money”. As the financial cost and efficiency of these services move quickly in a more enabling direction, eventually we may be able to use extremely high quality simulacras in all runs of the Council.
-
 ## Future Improvements
 This idea generation and evaluation “Council” model is only a basic adaptation and implementation of an idea originally intended for Instrumental Variable idea generation in econometric analysis. In future iterations, I will look to:
-- Implement memory for the agents in order to minimise repetition of similar ideas and allow them to use previous discussion as a springboard for rebuttals and arguments
-- Finetune prompts, temperature and other parameters related to the LLM response generation
-- Expand the Member templates so that an inbuilt array of “social simulacra” are available and already finetuned
-- Introduce functionality so that one can filter based on field or person, and overall utilise a greater range of perspectives
+- ~~Implement memory for the agents in order to minimise repetition of similar ideas and allow them to use previous discussion as a springboard for rebuttals and arguments~~
+- Finetune prompts, temperature and other parameters related to the LLM response generation [**Progress Made**]
+- Expand the Member templates so that an inbuilt array of “social simulacra” are available and already finetuned [**Progress Made**]
+- Introduce functionality so that one can filter based on field or person, and overall utilise a greater range of perspectives [**Can now filter based on field**]
 - Create a clearer structure and cleaner data output
+
+## Future
+There is still a lot of improvements to be made, both in Council design, as well as Council Member development, and thus any and all contributions are welcome.
 
 ## Examples (formatted by me, but text unchanged)
 ### Topic
