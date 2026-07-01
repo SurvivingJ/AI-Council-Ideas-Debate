@@ -46,10 +46,24 @@ The original `openaicouncil.py` is a single-file CLI that:
   structured JSON `{"score": 1-10, "reasoning": "..."}` on logic/evidence/rigour,
   replacing the VADER sentiment proxy. Robust parsing with a regex + neutral
   fallback so one malformed reply can't crash a run.
-- **[done] 8 new members**, broadening beyond pure economics into innovation,
-  finance-fragility, governance, management and development:
-  Schumpeter, Ostrom, Minsky, Galbraith, Sowell, Drucker, Christensen,
-  Ha-Joon Chang. Roster grows 19 → 27.
+- **[done] 36 new members**, growing the roster 19 → 55 and broadening far
+  beyond economics:
+  - *Economics/innovation (8):* Schumpeter, Ostrom, Minsky, Galbraith, Sowell,
+    Drucker, Christensen, Ha-Joon Chang.
+  - *History (7):* Ibn Khaldun, Herodotus, Thucydides, Sima Qian, Gibbon,
+    Braudel, Toynbee.
+  - *Science (12):* Einstein, Newton, Darwin, Marie Curie, Galileo, Bohr,
+    Feynman, Mendeleev, von Humboldt, Pasteur, Rosalind Franklin, Aristotle.
+  - *Technology (9):* Tesla, Turing, Ada Lovelace, Leonardo da Vinci,
+    von Neumann, Grace Hopper, Shannon, Wiener, Buckminster Fuller.
+
+  The roster is deliberately multilingual/multicultural — figures who thought
+  and wrote in Arabic, Greek, Chinese, French, German, Italian, Russian,
+  Hungarian and Serbian are all included (they are role-played in English, the
+  debate language, but retain their distinct worldview). New `master_tags.txt`
+  tags cover history, science, technology, physics, chemistry, biology,
+  mathematics, computing, engineering, medicine, ecology, geography and
+  philosophy.
 - **[done] Interview-driven persona builder** (`interview.py`). Generates probing
   questions, role-plays the figure's answers, and distils a rich
   `instructions.txt` + suggested tags — producing far more distinctive personas
@@ -100,8 +114,10 @@ The original `openaicouncil.py` is a single-file CLI that:
 - **Persona knowledge cards.** Alongside `instructions.txt`, generate a short list
   of the figure's signature concepts, canonical quotes and rivals, injected as
   few-shot flavour.
-- **Broaden the roster** beyond economics: scientists, technologists, ethicists,
-  historians, so the Council can tackle non-economic topics well.
+- **[done] Broaden the roster** beyond economics: historians, scientists and
+  technologists are now included, so the Council can tackle non-economic topics.
+  Further breadth (ethicists, artists, legal thinkers, non-Western political
+  philosophers) would extend this further.
 
 ## 5. Data output & evaluation
 
