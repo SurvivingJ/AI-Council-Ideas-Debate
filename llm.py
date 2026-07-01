@@ -42,6 +42,10 @@ class LLMConfig:
     model: str | None = None
     temperature: float = 0.8
     max_retries: int = 4
+    # Best-effort determinism: forwarded to the API `seed` param where the
+    # model supports it. Same (prompt, seed) -> same output; different prompts
+    # still differ. None leaves the request unseeded.
+    seed: int | None = None
 
     def resolved_model(self) -> str:
         if self.model:
@@ -106,6 +110,8 @@ class LLMClient:
         }
         if response_format is not None:
             kwargs["response_format"] = response_format
+        if self.config.seed is not None:
+            kwargs["seed"] = self.config.seed
 
         delay = 2.0
         last_err: Exception | None = None

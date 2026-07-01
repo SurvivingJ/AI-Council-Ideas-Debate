@@ -80,22 +80,35 @@ The original `openaicouncil.py` is a single-file CLI that:
 - **[done] Clean, scriptable CLI** with `--topic/--provider/--model/--tags/--ideas`
   and **structured JSON output** (`results.json`) containing every idea, the full
   debate transcript, per-argument scores and the winner.
+- **[done] Multi-judge panel + median aggregation** (`council.py`, `JudgePanel`).
+  A panel of judges with distinct temperaments (Sceptic, Pragmatist, Empiricist,
+  Theorist, Generalist) each score every argument and idea; the aggregate is the
+  **median**, robust to a single outlier judge. Size set via `--judges`
+  (default 3); per-judge votes are stored in the transcript.
+- **[done] Direct post-debate idea verdict.** Ideas are now ranked by a judged
+  verdict on the idea's *own merit* (soundness/feasibility/value, informed by the
+  strongest points each side made) rather than by total argument volume — which
+  previously rewarded the most *contentious* idea, not the best one. Total
+  argument quality is kept only as a tie-breaker.
+- **[done] Reproducibility.** A `--seed` seeds the RNG and is forwarded to the API
+  (`seed` param) for best-effort determinism, and is recorded in `results.json`
+  alongside model, temperature, members and judges.
 - **[done] `requirements.txt`** and expanded `master_tags.txt`.
 
 ---
 
 ## 3. Backend logic & prompt improvements (proposals)
 
-- **Multi-judge panels + score aggregation.** Use 3–5 judges with different
-  temperaments (a sceptic, an optimist, a domain expert) and average/median their
-  rubric scores to reduce single-judge variance. The `Judge` class already
-  supports this — just instantiate several.
+- **[done] Multi-judge panels + score aggregation.** A `JudgePanel` of judges with
+  distinct temperaments (Sceptic, Pragmatist, Empiricist, Theorist, Generalist)
+  median-aggregates each rubric score; `--judges` sets the size, per-judge votes
+  are stored.
 - **Multi-dimensional rubric.** Score each argument on separate axes (novelty,
   feasibility, evidence, internal logic, risk) rather than one number, and let the
   user weight them. Store the vector in the JSON.
-- **Score the *idea*, not just the arguments.** Currently "best" = idea that
-  sustains the most total argument quality. Add a direct judged verdict of the
-  idea after the debate ("given both sides, rate this idea 1–10").
+- **[done] Score the *idea*, not just the arguments.** Ideas are ranked by a direct
+  post-debate verdict on the idea's own merit (informed by the strongest points
+  each side made); total argument quality is now only a tie-breaker.
 - **Structured debate rounds.** Opening → cross-examination → closing, with a
   configurable number of rounds, instead of a single arg+rebut exchange.
 - **De-duplication / clustering of ideas.** Embed generated ideas and cluster to
@@ -107,8 +120,9 @@ The original `openaicouncil.py` is a single-file CLI that:
   top-k chunks, inject into the system prompt) so members cite their own corpus.
 - **Cost & token accounting.** Log tokens and estimated cost per run from the API
   usage field; surface a per-run summary. Helps compare models on OpenRouter.
-- **Reproducibility.** Seed the RNG and record the seed, model, and full config in
-  `results.json` (config is already recorded; add the seed).
+- **[done] Reproducibility.** `--seed` seeds the RNG, is forwarded to the API for
+  best-effort determinism, and is recorded with model/temperature/members/judges
+  in `results.json`.
 - **Async / concurrent calls.** Members debate independently — fan the calls out
   with `asyncio`/threads to cut wall-clock time dramatically.
 - **Caching.** Cache identical (system, prompt, model) calls to avoid paying twice
@@ -164,6 +178,10 @@ The original `openaicouncil.py` is a single-file CLI that:
 
 ## Suggested next milestone
 
-1. Multi-judge panel + multi-axis rubric (biggest quality win, small code change).
-2. Async fan-out + token/cost logging (biggest speed/cost win).
+Result-quality bundle (multi-judge panel, direct idea verdict, reproducible seed)
+is **done**. Remaining high-value work, in order:
+
+1. Async fan-out + token/cost logging (biggest speed/cost win — needed to run the
+   55-member roster comfortably).
+2. RAG over each member's `Files/` corpus (biggest authenticity/quality jump).
 3. Streamlit UI over `results.json` (biggest UX win).

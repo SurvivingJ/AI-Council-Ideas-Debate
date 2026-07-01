@@ -5,8 +5,11 @@ A modern, provider-agnostic rewrite of the original ``openaicouncil.py``.
 Key differences from the original:
   * Uses Chat Completions (works with OpenRouter *and* OpenAI) instead of the
     now-deprecated OpenAI Assistants API.
-  * Judges return a structured 1-10 rubric score (logic / evidence / rigour)
-    instead of the crude VADER sentiment proxy.
+  * A multi-judge panel with distinct temperaments returns structured 1-10
+    rubric scores (median-aggregated) instead of the crude VADER sentiment proxy.
+  * Ideas are ranked by a direct post-debate verdict on the idea's own merit,
+    not by how much total argument they generated.
+  * Runs are reproducible: a --seed is recorded and forwarded to the API.
   * Each persona keeps its own running conversation per side, so members build
     on their prior arguments.
   * Fully configurable from the command line; results are written as JSON.
@@ -25,7 +28,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import re
+import statistics
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -170,45 +175,105 @@ class Member:
 
 
 # --------------------------------------------------------------------------- #
-# Judge
+# Judges
 # --------------------------------------------------------------------------- #
 _SCORE_RE = re.compile(r'"?score"?\s*[:=]\s*(-?\d+(?:\.\d+)?)', re.IGNORECASE)
 
+# A panel of judges with distinct temperaments reduces the variance of any one
+# judge. For a panel of N, the first N temperaments are used (cycling if N is
+# larger than the list).
+JUDGE_TEMPERAMENTS: list[tuple[str, str]] = [
+    (
+        "Sceptic",
+        "You are the SCEPTIC on the judging panel: ruthlessly critical. Demand "
+        "airtight logic and hard evidence, and dock heavily for any fallacy, "
+        "hand-waving or unsupported leap.",
+    ),
+    (
+        "Pragmatist",
+        "You are the PRAGMATIST on the judging panel: you reward reasoning that "
+        "is constructive, actionable and grounded in real-world feasibility, "
+        "while still penalising sloppy logic.",
+    ),
+    (
+        "Empiricist",
+        "You are the EMPIRICIST on the judging panel: you weight concrete "
+        "evidence, data and historical precedent above rhetoric, and reward "
+        "claims that could be tested or have been borne out in practice.",
+    ),
+    (
+        "Theorist",
+        "You are the THEORIST on the judging panel: you prize internal "
+        "coherence, conceptual clarity and first-principles rigour, rewarding "
+        "arguments that are logically well-structured and consistent.",
+    ),
+    (
+        "Generalist",
+        "You are the GENERALIST on the judging panel: a balanced, impartial "
+        "adjudicator who weighs logic, evidence and clarity together without "
+        "favouring any one dimension.",
+    ),
+]
+
+_JSON_RUBRIC = (
+    "\n\nArguments and ideas may include original-language key terms (glossed "
+    "in English) from thinkers who worked in other languages; judge the "
+    "substance and do not reward or penalise them for it."
+    "\n\nYou MUST reply with a JSON object of the form "
+    '{"score": <integer 1-10>, "reasoning": "<one or two sentences>"} and '
+    "nothing else."
+)
+
 
 class Judge:
-    """Scores arguments on a numeric rubric instead of sentiment polarity."""
+    """A single judge with a temperament; scores arguments and ideas 1-10."""
 
-    def __init__(self, instructions: str, client: LLMClient):
+    def __init__(
+        self,
+        instructions: str,
+        client: LLMClient,
+        name: str = "Judge",
+        temperament: str = "",
+    ):
         self.client = client
-        self.instructions = (
-            instructions
-            + "\n\nArguments may include original-language key terms (glossed in "
-            "English) from thinkers who worked in other languages; judge the "
-            "substance and do not reward or penalise an argument for using them."
-            "\n\nYou MUST reply with a JSON object of the form "
-            '{"score": <integer 1-10>, "reasoning": "<one or two sentences>"} '
-            "where 10 means a flawless, rigorous, well-evidenced argument and 1 "
-            "means fallacious or baseless. Reply with JSON only."
-        )
+        self.name = name
+        self.instructions = instructions
+        if temperament:
+            self.instructions += "\n\n" + temperament
+        self.instructions += _JSON_RUBRIC
 
-    def score(self, topic: str, idea: str, argument: str) -> tuple[float, str]:
-        messages = [
-            {"role": "system", "content": self.instructions},
-            {
-                "role": "user",
-                "content": (
-                    f"Topic: {topic}\nIdea: {idea}\n\n"
-                    f"Argument to judge:\n\"{argument}\"\n\n"
-                    "Score its logical strength, evidence and rigour."
-                ),
-            },
-        ]
+    def _judge(self, user_prompt: str) -> tuple[float, str]:
         raw = self.client.chat(
-            messages,
+            [
+                {"role": "system", "content": self.instructions},
+                {"role": "user", "content": user_prompt},
+            ],
             temperature=0.2,
             response_format={"type": "json_object"},
         )
         return self._parse(raw)
+
+    def score_argument(self, topic: str, idea: str, argument: str) -> tuple[float, str]:
+        return self._judge(
+            f"Topic: {topic}\nIdea: {idea}\n\n"
+            f"Argument to judge:\n\"{argument}\"\n\n"
+            "Score its logical strength, evidence and rigour, where 10 is a "
+            "flawless, rigorous, well-evidenced argument and 1 is fallacious or "
+            "baseless."
+        )
+
+    def score_idea(
+        self, topic: str, idea: str, for_case: str, against_case: str
+    ) -> tuple[float, str]:
+        return self._judge(
+            f"Topic: {topic}\n\nIdea under judgement:\n\"{idea}\"\n\n"
+            f"The strongest points made FOR it:\n{for_case}\n\n"
+            f"The strongest points made AGAINST it:\n{against_case}\n\n"
+            "Having weighed both sides, score the IDEA ITSELF on its own merit - "
+            "its soundness, feasibility and value - where 10 is an excellent, "
+            "compelling idea that survives scrutiny and 1 is a poor or unworkable "
+            "one. Judge the idea, not the eloquence of either side."
+        )
 
     @staticmethod
     def _parse(raw: str) -> tuple[float, str]:
@@ -223,6 +288,41 @@ class Judge:
             return 5.0, raw.strip()
 
 
+class JudgePanel:
+    """Aggregates several judges; the aggregate score is the median (robust to
+    a single outlier judge)."""
+
+    def __init__(self, instructions: str, client: LLMClient, n_judges: int = 3):
+        n_judges = max(1, n_judges)
+        self.judges = [
+            Judge(instructions, client, name=JUDGE_TEMPERAMENTS[i % len(JUDGE_TEMPERAMENTS)][0],
+                  temperament=JUDGE_TEMPERAMENTS[i % len(JUDGE_TEMPERAMENTS)][1])
+            for i in range(n_judges)
+        ]
+
+    @property
+    def names(self) -> list[str]:
+        return [j.name for j in self.judges]
+
+    @staticmethod
+    def _aggregate(votes: list[dict]) -> float:
+        return statistics.median(v["score"] for v in votes)
+
+    def score_argument(self, topic: str, idea: str, argument: str) -> dict:
+        votes = []
+        for j in self.judges:
+            score, reasoning = j.score_argument(topic, idea, argument)
+            votes.append({"judge": j.name, "score": score, "reasoning": reasoning})
+        return {"aggregate": self._aggregate(votes), "votes": votes}
+
+    def score_idea(self, topic: str, idea: str, for_case: str, against_case: str) -> dict:
+        votes = []
+        for j in self.judges:
+            score, reasoning = j.score_idea(topic, idea, for_case, against_case)
+            votes.append({"judge": j.name, "score": score, "reasoning": reasoning})
+        return {"aggregate": self._aggregate(votes), "votes": votes}
+
+
 # --------------------------------------------------------------------------- #
 # Council orchestration
 # --------------------------------------------------------------------------- #
@@ -235,17 +335,28 @@ class RunConfig:
     provider: str = "openrouter"
     model: str | None = None
     temperature: float = 0.8
+    judges: int = 3
+    seed: int | None = None
     output: str = "results.json"
+
+
+# How many of the top-scoring arguments per side feed the idea verdict. Keeps
+# the verdict prompt bounded regardless of council size.
+_TOP_ARGS_PER_SIDE = 3
 
 
 class Council:
     def __init__(self, run: RunConfig):
         self.run = run
+        # Reproducibility: seed Python RNG and forward the seed to the API.
+        if run.seed is not None:
+            random.seed(run.seed)
         self.client = LLMClient(
             LLMConfig(
                 provider=run.provider,
                 model=run.model,
                 temperature=run.temperature,
+                seed=run.seed,
             )
         )
         self.personas = load_personas(run.tags, run.require_all)
@@ -254,12 +365,14 @@ class Council:
                 "No council members matched the requested tags. "
                 "Try different --tags or drop the filter."
             )
-        self.judge = Judge(load_judge_instructions(), self.client)
+        self.panel = JudgePanel(load_judge_instructions(), self.client, run.judges)
         print(
-            f"Convened {len(self.personas)} members on "
-            f"'{run.provider}:{self.client.model}': "
-            + ", ".join(p.name for p in self.personas)
+            f"Convened {len(self.personas)} members and a "
+            f"{len(self.panel.judges)}-judge panel ({', '.join(self.panel.names)}) "
+            f"on '{run.provider}:{self.client.model}'"
+            + (f" [seed={run.seed}]" if run.seed is not None else "")
         )
+        print("Members: " + ", ".join(p.name for p in self.personas))
 
     # -- idea generation --------------------------------------------------- #
     def gather_ideas(self) -> list[dict]:
@@ -285,38 +398,64 @@ class Council:
             pro_rebut = pro.rebut(self.run.topic, idea, con_arg)
             con_rebut = con.rebut(self.run.topic, idea, pro_arg)
 
-            for label, arg, bucket in [
+            for label, arg, side in [
                 ("for_arg", pro_arg, "for"),
                 ("against_arg", con_arg, "against"),
                 ("for_rebuttal", pro_rebut, "for"),
                 ("against_rebuttal", con_rebut, "against"),
             ]:
-                score, reasoning = self.judge.score(self.run.topic, idea, arg)
-                if bucket == "for":
-                    for_total += score
+                verdict = self.panel.score_argument(self.run.topic, idea, arg)
+                if side == "for":
+                    for_total += verdict["aggregate"]
                 else:
-                    against_total += score
+                    against_total += verdict["aggregate"]
                 transcript.append(
                     {
                         "member": persona.name,
                         "type": label,
+                        "side": side,
                         "argument": arg,
-                        "score": score,
-                        "judge_reasoning": reasoning,
+                        "score": verdict["aggregate"],
+                        "judge_votes": verdict["votes"],
                     }
                 )
             print(
                 f"  {persona.name}: for={for_total:.0f} against={against_total:.0f}"
             )
 
+        # Direct verdict on the idea's own merit, judged from the strongest
+        # points each side actually made (bounded to the top few per side).
+        for_case = self._best_points(transcript, "for")
+        against_case = self._best_points(transcript, "against")
+        idea_verdict = self.panel.score_idea(
+            self.run.topic, idea, for_case, against_case
+        )
+        print(f"  -> idea verdict: {idea_verdict['aggregate']:.1f}/10")
+
         return {
             "idea": idea,
+            "verdict_score": idea_verdict["aggregate"],
+            "verdict_votes": idea_verdict["votes"],
             "for_score": for_total,
             "against_score": against_total,
             "total_score": for_total + against_total,
             "margin": for_total - against_total,
             "transcript": transcript,
         }
+
+    @staticmethod
+    def _best_points(transcript: list[dict], side: str, limit: int = _TOP_ARGS_PER_SIDE) -> str:
+        entries = sorted(
+            (e for e in transcript if e["side"] == side),
+            key=lambda e: e["score"],
+            reverse=True,
+        )[:limit]
+        if not entries:
+            return "(none)"
+        return "\n".join(
+            f"- [{e['member']}, score {e['score']:.0f}] {e['argument'][:800]}"
+            for e in entries
+        )
 
     def run_session(self) -> dict:
         started = time.time()
@@ -332,15 +471,22 @@ class Council:
             print(f"=== Debating idea by {item['author']} ===")
             evaluations.append(self.evaluate_idea(item["idea"]))
 
-        # Best idea = highest combined argument quality (a proxy for how much
-        # substantive debate the idea can sustain).
-        best = max(evaluations, key=lambda e: e["total_score"]) if evaluations else None
+        # Best idea = highest direct verdict on the idea's own merit; the total
+        # argument quality is a tie-breaker (how much substance the debate had).
+        best = (
+            max(evaluations, key=lambda e: (e["verdict_score"], e["total_score"]))
+            if evaluations
+            else None
+        )
 
         result = {
             "topic": self.run.topic,
             "provider": self.run.provider,
             "model": self.client.model,
+            "seed": self.run.seed,
+            "temperature": self.run.temperature,
             "members": [p.name for p in self.personas],
+            "judges": self.panel.names,
             "all_ideas": all_ideas,
             "evaluations": evaluations,
             "best_idea": best,
@@ -352,11 +498,11 @@ class Council:
 
         print("\n" + "=" * 60)
         if best:
-            print("BEST IDEA (highest sustained debate quality):")
+            print(f"BEST IDEA (verdict {best['verdict_score']:.1f}/10):")
             print(best["idea"])
             print(
-                f"\n[for {best['for_score']:.0f} | against "
-                f"{best['against_score']:.0f} | total {best['total_score']:.0f}]"
+                f"\n[verdict {best['verdict_score']:.1f}/10 | debate substance: "
+                f"for {best['for_score']:.0f}, against {best['against_score']:.0f}]"
             )
         print(f"\nFull results written to {self.run.output}")
         print("=" * 60)
@@ -390,6 +536,18 @@ def parse_args() -> RunConfig:
     p.add_argument(
         "--ideas", type=int, default=3, help="How many ideas to debate."
     )
+    p.add_argument(
+        "--judges",
+        type=int,
+        default=3,
+        help="Size of the judging panel (default: 3; scores are the median).",
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Seed for reproducibility (recorded and sent to the API).",
+    )
     p.add_argument("--temperature", type=float, default=0.8)
     p.add_argument("--output", default="results.json")
     args = p.parse_args()
@@ -403,6 +561,8 @@ def parse_args() -> RunConfig:
         provider=args.provider,
         model=args.model,
         temperature=args.temperature,
+        judges=args.judges,
+        seed=args.seed,
         output=args.output,
     )
 

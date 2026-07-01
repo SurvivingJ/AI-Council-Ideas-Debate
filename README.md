@@ -21,13 +21,18 @@ python council.py --topic "How to boost local civic participation"
 # Pick a specific model / filter the roster by expertise
 python council.py --topic "..." --model anthropic/claude-3.5-sonnet --tags economics innovation --ideas 5
 
+# Bigger judging panel + reproducible run
+python council.py --topic "..." --judges 5 --seed 42
+
 # Or use OpenAI
 export OPENAI_API_KEY=sk-...
 python council.py --topic "..." --provider openai --model gpt-4o
 ```
 
-Results (every idea, the full debate transcript, per-argument scores and the
-winner) are written to `results.json`.
+Results are written to `results.json`: every idea, the full debate transcript
+with **per-judge votes**, each idea's **direct verdict score** (1–10 on its own
+merit, which is what the winner is ranked on), and the run's seed/model/judges
+for reproducibility.
 
 ### Building richer personalities via interviews
 
