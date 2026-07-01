@@ -24,43 +24,24 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-import difflib
 import json
-import math
 import statistics
 
 from llm import LLMClient, LLMConfig
 from framing import neutralize_topic, generate_variants, Variant
 from council import Council, RunConfig
+from similarity import similarity_fn
 
 
-# --------------------------------------------------------------------------- #
-# Similarity
-# --------------------------------------------------------------------------- #
-def _cosine(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(y * y for y in b))
-    return dot / (na * nb) if na and nb else 0.0
-
-
-def build_similarity(texts: list[str], client: LLMClient):
-    """Return (sim(i, j) -> float, method_name). Embeddings if available, else
-    a lexical fallback so the analysis still runs anywhere."""
-    try:
-        embs = client.embed(texts)
-
-        def sim(i: int, j: int) -> float:
-            return _cosine(embs[i], embs[j])
-
-        return sim, "embeddings"
-    except Exception as err:  # noqa: BLE001 - embeddings are best-effort
-        print(f"[sensitivity] embeddings unavailable ({err}); using lexical similarity")
-
-        def sim(i: int, j: int) -> float:
-            return difflib.SequenceMatcher(None, texts[i], texts[j]).ratio()
-
-        return sim, "lexical"
+def _sum_usage(usages: list[dict]) -> dict:
+    total = {"requests": 0, "cache_hits": 0, "prompt_tokens": 0,
+             "completion_tokens": 0, "estimated_cost_usd": 0.0}
+    for u in usages:
+        for k in total:
+            total[k] += u.get(k, 0) or 0
+    total["estimated_cost_usd"] = round(total["estimated_cost_usd"], 6)
+    total["total_tokens"] = total["prompt_tokens"] + total["completion_tokens"]
+    return total
 
 
 def _label(value: float, high: float, medium: float, invert: bool = False) -> str:
@@ -84,7 +65,9 @@ def _label(value: float, high: float, medium: float, invert: bool = False) -> st
 def run_sensitivity(
     base: RunConfig, n_paraphrase: int, n_reframe: int, output: str
 ) -> dict:
-    client = LLMClient(LLMConfig(provider=base.provider, model=base.model, seed=base.seed))
+    client = LLMClient(
+        LLMConfig(provider=base.provider, model=base.model, seed=base.seed, cache=base.cache)
+    )
 
     print("Neutralising topic...")
     neutral = neutralize_topic(client, base.topic)
@@ -101,10 +84,12 @@ def run_sensitivity(
     # Run the council on each wording, seed fixed, neutralisation off (we control
     # the exact wording here).
     runs = []
+    usages = []
     for v in wordings:
         print(f"\n{'#' * 60}\n# Running council on [{v.kind}]: {v.text}\n{'#' * 60}")
         cfg = dataclasses.replace(base, topic=v.text, neutralize=False)
         result = Council(cfg).run_session(write=False)
+        usages.append(result.get("usage", {}))
         best = result.get("best_idea") or {}
         runs.append(
             {
@@ -117,6 +102,7 @@ def run_sensitivity(
         )
 
     report = _compare(runs, client)
+    total_usage = _sum_usage([client.usage_summary(), *usages])
     out = {
         "original_topic": base.topic,
         "neutralization": neutral.to_dict(),
@@ -124,17 +110,25 @@ def run_sensitivity(
         "seed": base.seed,
         "runs": runs,
         "analysis": report,
+        "usage": total_usage,
     }
     with open(output, "w", encoding="utf-8") as f:
         json.dump(out, f, indent=2, ensure_ascii=False)
 
     _print_report(base.topic, neutral.neutral_topic, runs, report, output)
+    cost = total_usage["estimated_cost_usd"]
+    print(
+        f"Total usage across {len(wordings)} council runs: "
+        f"{total_usage['requests']} requests, {total_usage['cache_hits']} cache hits, "
+        f"{total_usage['total_tokens']} tokens, est. cost "
+        + (f"~${cost:.4f}" if cost else "n/a")
+    )
     return out
 
 
 def _compare(runs: list[dict], client: LLMClient) -> dict:
     winners = [r["best_idea"] or "(none)" for r in runs]
-    sim, method = build_similarity(winners, client)
+    sim, method = similarity_fn(winners, client)
 
     # runs[0] is the baseline.
     to_baseline = {i: round(sim(0, i), 3) for i in range(1, len(runs))}

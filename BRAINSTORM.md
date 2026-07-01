@@ -102,6 +102,12 @@ The original `openaicouncil.py` is a single-file CLI that:
   should be stable under paraphrase — instability is noise) from **framing
   sensitivity** (answer moving under reframing is a genuine finding). Idea
   overlap uses embeddings with a lexical fallback.
+- **[done] Concurrency, de-duplication, caching and cost accounting** (Tier 2).
+  Independent debate/scoring calls fan out across threads (`--concurrency`);
+  generated ideas are de-duplicated before the debate via embeddings with a
+  lexical fallback (`similarity.py`, `--no-dedupe`); identical requests are
+  served from a thread-safe on-disk cache (`--no-cache`); and per-run token
+  usage + estimated USD cost are accumulated and recorded in `results.json`.
 - **[done] `requirements.txt`** and expanded `master_tags.txt`.
 
 ---
@@ -120,22 +126,23 @@ The original `openaicouncil.py` is a single-file CLI that:
   each side made); total argument quality is now only a tie-breaker.
 - **Structured debate rounds.** Opening → cross-examination → closing, with a
   configurable number of rounds, instead of a single arg+rebut exchange.
-- **De-duplication / clustering of ideas.** Embed generated ideas and cluster to
-  drop near-duplicates before the (expensive) debate phase, so the debate budget
-  is spent on genuinely distinct ideas.
+- **[done] De-duplication / clustering of ideas.** Generated ideas are embedded
+  and greedily clustered (`similarity.py`) to drop near-duplicates before the
+  expensive debate phase; `--dedupe-threshold` tunes it, `--no-dedupe` disables.
 - **Retrieval / RAG for knowledge files.** The old app fed each member's `Files/`
   (Buffett's shareholder letters, Keynes' *General Theory*, etc.) via Assistants
   retrieval. Re-add this with a vendor-neutral RAG step (embed the PDFs, retrieve
   top-k chunks, inject into the system prompt) so members cite their own corpus.
-- **Cost & token accounting.** Log tokens and estimated cost per run from the API
-  usage field; surface a per-run summary. Helps compare models on OpenRouter.
+- **[done] Cost & token accounting.** Per-run tokens and an estimated USD cost are
+  accumulated from the API usage field and recorded/printed; pricing is
+  extensible via `LLM_PRICING_JSON`.
 - **[done] Reproducibility.** `--seed` seeds the RNG, is forwarded to the API for
   best-effort determinism, and is recorded with model/temperature/members/judges
   in `results.json`.
-- **Async / concurrent calls.** Members debate independently — fan the calls out
-  with `asyncio`/threads to cut wall-clock time dramatically.
-- **Caching.** Cache identical (system, prompt, model) calls to avoid paying twice
-  during development and re-runs.
+- **[done] Async / concurrent calls.** Independent debate/scoring calls fan out
+  across a thread pool (`pmap`, `--concurrency`), cutting wall-clock time.
+- **[done] Caching.** Identical `(model, messages, temperature, response_format,
+  seed)` requests are served from a thread-safe on-disk cache (`--no-cache`).
 
 ## 4. Persona & "interview" improvements
 
@@ -187,10 +194,11 @@ The original `openaicouncil.py` is a single-file CLI that:
 
 ## Suggested next milestone
 
-Result-quality bundle (multi-judge panel, direct idea verdict, reproducible seed)
-is **done**. Remaining high-value work, in order:
+The result-quality bundle (multi-judge panel, direct idea verdict, seed) and the
+full Tier 2 practicality bundle (concurrency, de-dup, caching, cost accounting)
+are **done**. Remaining high-value work, in order:
 
-1. Async fan-out + token/cost logging (biggest speed/cost win — needed to run the
-   55-member roster comfortably).
-2. RAG over each member's `Files/` corpus (biggest authenticity/quality jump).
+1. RAG over each member's `Files/` corpus (biggest authenticity/quality jump —
+   the embedding + similarity infra is now already in place to build on).
+2. Multi-dimensional rubric (novelty/feasibility/evidence/logic/risk).
 3. Streamlit UI over `results.json` (biggest UX win).

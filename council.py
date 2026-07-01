@@ -32,6 +32,7 @@ import random
 import re
 import statistics
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -39,6 +40,20 @@ from llm import LLMClient, LLMConfig
 
 
 MEMBERS_DIR = "CouncilMembers"
+
+
+def pmap(fn, items, workers: int):
+    """Map ``fn`` over ``items`` concurrently with threads, preserving order.
+
+    Threads (not asyncio) because the OpenAI SDK is synchronous and releases the
+    GIL during network I/O, so debate/scoring calls that are independent run in
+    parallel. Falls back to a serial map for tiny workloads.
+    """
+    items = list(items)
+    if workers <= 1 or len(items) <= 1:
+        return [fn(x) for x in items]
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        return list(ex.map(fn, items))
 
 
 class Side(Enum):
@@ -338,6 +353,10 @@ class RunConfig:
     judges: int = 3
     seed: int | None = None
     neutralize: bool = True
+    concurrency: int = 8
+    dedupe: bool = True
+    dedupe_threshold: float = 0.85
+    cache: bool = True
     output: str = "results.json"
 
 
@@ -358,6 +377,7 @@ class Council:
                 model=run.model,
                 temperature=run.temperature,
                 seed=run.seed,
+                cache=run.cache,
             )
         )
         # Optionally debias the topic before convening (see framing.py). The
@@ -397,61 +417,83 @@ class Council:
 
     # -- idea generation --------------------------------------------------- #
     def gather_ideas(self) -> list[dict]:
-        ideas = []
-        for persona in self.personas:
+        def one(persona: Persona) -> dict:
             member = Member(persona, Side.FOR, self.client)
-            idea = member.generate_idea(self.run.topic)
-            print(f"\n[{persona.name}] proposes:\n{idea}")
-            ideas.append({"author": persona.name, "idea": idea})
+            return {"author": persona.name, "idea": member.generate_idea(self.run.topic)}
+
+        ideas = pmap(one, self.personas, self.run.concurrency)
+        for item in ideas:
+            print(f"\n[{item['author']}] proposes:\n{item['idea']}")
         return ideas
+
+    def dedupe_ideas(self, ideas: list[dict]) -> tuple[list[dict], dict]:
+        """Drop near-duplicate ideas so the debate budget is spent on distinct
+        ones. Returns (unique_ideas, info)."""
+        from similarity import dedupe
+
+        texts = [i["idea"] for i in ideas]
+        kept, clusters, method = dedupe(texts, self.client, self.run.dedupe_threshold)
+        unique = [ideas[i] for i in kept]
+        merged = {
+            ideas[rep]["author"]: [ideas[d]["author"] for d in dups]
+            for rep, dups in clusters.items()
+            if dups
+        }
+        info = {
+            "method": method,
+            "raw_count": len(ideas),
+            "unique_count": len(unique),
+            "threshold": self.run.dedupe_threshold,
+            "merged": merged,
+        }
+        if len(unique) < len(ideas):
+            print(
+                f"\nDe-duplicated ideas: {len(ideas)} -> {len(unique)} distinct "
+                f"({method})."
+            )
+        return unique, info
 
     # -- debate & scoring -------------------------------------------------- #
     def evaluate_idea(self, idea: str) -> dict:
-        for_total = 0.0
-        against_total = 0.0
-        transcript = []
-        for persona in self.personas:
+        # Phase 1: every member debates (independent across members) -> fan out.
+        def debate(persona: Persona) -> list[dict]:
             pro = Member(persona, Side.FOR, self.client)
             con = Member(persona, Side.AGAINST, self.client)
-
             pro_arg = pro.argue(self.run.topic, idea)
             con_arg = con.argue(self.run.topic, idea)
             pro_rebut = pro.rebut(self.run.topic, idea, con_arg)
             con_rebut = con.rebut(self.run.topic, idea, pro_arg)
+            return [
+                {"member": persona.name, "type": "for_arg", "side": "for", "argument": pro_arg},
+                {"member": persona.name, "type": "against_arg", "side": "against", "argument": con_arg},
+                {"member": persona.name, "type": "for_rebuttal", "side": "for", "argument": pro_rebut},
+                {"member": persona.name, "type": "against_rebuttal", "side": "against", "argument": con_rebut},
+            ]
 
-            for label, arg, side in [
-                ("for_arg", pro_arg, "for"),
-                ("against_arg", con_arg, "against"),
-                ("for_rebuttal", pro_rebut, "for"),
-                ("against_rebuttal", con_rebut, "against"),
-            ]:
-                verdict = self.panel.score_argument(self.run.topic, idea, arg)
-                if side == "for":
-                    for_total += verdict["aggregate"]
-                else:
-                    against_total += verdict["aggregate"]
-                transcript.append(
-                    {
-                        "member": persona.name,
-                        "type": label,
-                        "side": side,
-                        "argument": arg,
-                        "score": verdict["aggregate"],
-                        "judge_votes": verdict["votes"],
-                    }
-                )
-            print(
-                f"  {persona.name}: for={for_total:.0f} against={against_total:.0f}"
-            )
+        per_member = pmap(debate, self.personas, self.run.concurrency)
+        entries = [e for sub in per_member for e in sub]
 
-        # Direct verdict on the idea's own merit, judged from the strongest
-        # points each side actually made (bounded to the top few per side).
+        # Phase 2: score every argument (independent) -> fan out.
+        def score(entry: dict) -> dict:
+            verdict = self.panel.score_argument(self.run.topic, idea, entry["argument"])
+            return {**entry, "score": verdict["aggregate"], "judge_votes": verdict["votes"]}
+
+        transcript = pmap(score, entries, self.run.concurrency)
+
+        for_total = sum(e["score"] for e in transcript if e["side"] == "for")
+        against_total = sum(e["score"] for e in transcript if e["side"] == "against")
+
+        # Phase 3: direct verdict on the idea's own merit, judged from the
+        # strongest points each side actually made (bounded to the top few).
         for_case = self._best_points(transcript, "for")
         against_case = self._best_points(transcript, "against")
         idea_verdict = self.panel.score_idea(
             self.run.topic, idea, for_case, against_case
         )
-        print(f"  -> idea verdict: {idea_verdict['aggregate']:.1f}/10")
+        print(
+            f"  for={for_total:.0f} against={against_total:.0f} "
+            f"-> idea verdict: {idea_verdict['aggregate']:.1f}/10"
+        )
 
         return {
             "idea": idea,
@@ -482,10 +524,16 @@ class Council:
         started = time.time()
         all_ideas = self.gather_ideas()
 
-        # Evaluate a subset (deterministic: the first N gathered).
-        n = min(self.run.ideas_to_evaluate, len(all_ideas))
-        selected = all_ideas[:n]
-        print(f"\nEvaluating {n} of {len(all_ideas)} ideas...\n")
+        # Drop near-duplicates so the debate budget goes to distinct ideas.
+        dedupe_info = None
+        candidates = all_ideas
+        if self.run.dedupe and len(all_ideas) > 1:
+            candidates, dedupe_info = self.dedupe_ideas(all_ideas)
+
+        # Evaluate a subset (deterministic: the first N distinct ideas).
+        n = min(self.run.ideas_to_evaluate, len(candidates))
+        selected = candidates[:n]
+        print(f"\nEvaluating {n} of {len(candidates)} distinct ideas...\n")
 
         evaluations = []
         for item in selected:
@@ -510,8 +558,10 @@ class Council:
             "members": [p.name for p in self.personas],
             "judges": self.panel.names,
             "all_ideas": all_ideas,
+            "dedupe": dedupe_info,
             "evaluations": evaluations,
             "best_idea": best,
+            "usage": self.client.usage_summary(),
             "elapsed_seconds": round(time.time() - started, 1),
         }
 
@@ -527,8 +577,16 @@ class Council:
                 f"\n[verdict {best['verdict_score']:.1f}/10 | debate substance: "
                 f"for {best['for_score']:.0f}, against {best['against_score']:.0f}]"
             )
+        u = result["usage"]
+        cost = u["estimated_cost_usd"]
+        cost_str = f"~${cost:.4f}" if cost else "n/a (unpriced model)"
+        print(
+            f"\nUsage: {u['requests']} requests, {u['cache_hits']} cache hits, "
+            f"{u['total_tokens']} tokens, est. cost {cost_str}  "
+            f"(in {result['elapsed_seconds']}s)"
+        )
         if write:
-            print(f"\nFull results written to {self.run.output}")
+            print(f"Full results written to {self.run.output}")
         print("=" * 60)
         return result
 
@@ -578,6 +636,30 @@ def parse_args() -> RunConfig:
         action="store_false",
         help="Debate the topic exactly as given (skip the debiasing rewrite).",
     )
+    p.add_argument(
+        "--concurrency",
+        type=int,
+        default=8,
+        help="Max parallel LLM calls (default: 8; 1 = serial).",
+    )
+    p.add_argument(
+        "--no-dedupe",
+        dest="dedupe",
+        action="store_false",
+        help="Debate all generated ideas without dropping near-duplicates.",
+    )
+    p.add_argument(
+        "--dedupe-threshold",
+        type=float,
+        default=0.85,
+        help="Similarity above which two ideas are treated as duplicates.",
+    )
+    p.add_argument(
+        "--no-cache",
+        dest="cache",
+        action="store_false",
+        help="Disable the on-disk response cache.",
+    )
     p.add_argument("--temperature", type=float, default=0.8)
     p.add_argument("--output", default="results.json")
     args = p.parse_args()
@@ -594,6 +676,10 @@ def parse_args() -> RunConfig:
         judges=args.judges,
         seed=args.seed,
         neutralize=args.neutralize,
+        concurrency=args.concurrency,
+        dedupe=args.dedupe,
+        dedupe_threshold=args.dedupe_threshold,
+        cache=args.cache,
         output=args.output,
     )
 

@@ -27,6 +27,11 @@ python council.py --topic "..." --judges 5 --seed 42
 # Debate the topic exactly as written (skip the debiasing rewrite)
 python council.py --topic "..." --no-neutralize
 
+# Performance/cost knobs: parallelism, de-dup, and the on-disk cache
+python council.py --topic "..." --concurrency 16       # more parallel calls
+python council.py --topic "..." --no-dedupe             # debate every idea
+python council.py --topic "..." --no-cache              # ignore cached responses
+
 # Or use OpenAI
 export OPENAI_API_KEY=sk-...
 python council.py --topic "..." --provider openai --model gpt-4o
@@ -34,8 +39,16 @@ python council.py --topic "..." --provider openai --model gpt-4o
 
 Results are written to `results.json`: every idea, the full debate transcript
 with **per-judge votes**, each idea's **direct verdict score** (1–10 on its own
-merit, which is what the winner is ranked on), and the run's seed/model/judges
-for reproducibility.
+merit, which is what the winner is ranked on), the run's seed/model/judges for
+reproducibility, **de-duplication** info, and a **usage** summary (requests,
+cache hits, tokens, estimated USD cost).
+
+Debate/scoring calls that are independent run **concurrently** (threads), so a
+large council is far faster; generated ideas are **de-duplicated** (via
+embeddings, lexical fallback) so the debate budget goes to distinct ideas; and
+identical requests are served from an on-disk **cache** so re-runs and
+development don't pay twice. Token usage and an estimated cost are printed and
+recorded (extend/override the pricing table with a `LLM_PRICING_JSON` env var).
 
 ### Topic neutralisation & wording-sensitivity analysis
 
