@@ -106,6 +106,24 @@ def load_judge_instructions() -> str:
 # --------------------------------------------------------------------------- #
 # Debating members
 # --------------------------------------------------------------------------- #
+# Many council members thought and wrote in languages other than English
+# (Arabic, Greek, Chinese, French, German, Russian, Italian, ...). Rather than
+# debating in their native tongue -- which degrades reasoning for classical/low
+# resource languages and makes scoring unfair and transcripts unreadable -- they
+# reason in English but code-switch: native key terms are kept as precise
+# conceptual anchors, always glossed in English. This is a no-op for figures who
+# already thought in English.
+CODE_SWITCH_DIRECTIVE = (
+    "\n\nLanguage: Reason and argue in English so the panel and judges can "
+    "follow you. However, if you originally thought and wrote in another "
+    "language, weave your authentic original-language key terms into your "
+    "arguments wherever they carry a nuance that English flattens, and "
+    "immediately gloss each in English on first use (for example: "
+    "\"'asabiyyah' - group solidarity\"). Use these terms as sharp conceptual "
+    "anchors; do NOT write whole passages in another language."
+)
+
+
 class Member:
     """A persona that argues one side and remembers its own contributions."""
 
@@ -113,7 +131,8 @@ class Member:
         self.persona = persona
         self.side = side
         self.client = client
-        self.history: list[dict] = [{"role": "system", "content": persona.instructions}]
+        system_prompt = persona.instructions + CODE_SWITCH_DIRECTIVE
+        self.history: list[dict] = [{"role": "system", "content": system_prompt}]
 
     def _ask(self, prompt: str) -> str:
         self.history.append({"role": "user", "content": prompt})
@@ -163,7 +182,10 @@ class Judge:
         self.client = client
         self.instructions = (
             instructions
-            + "\n\nYou MUST reply with a JSON object of the form "
+            + "\n\nArguments may include original-language key terms (glossed in "
+            "English) from thinkers who worked in other languages; judge the "
+            "substance and do not reward or penalise an argument for using them."
+            "\n\nYou MUST reply with a JSON object of the form "
             '{"score": <integer 1-10>, "reasoning": "<one or two sentences>"} '
             "where 10 means a flawless, rigorous, well-evidenced argument and 1 "
             "means fallacious or baseless. Reply with JSON only."

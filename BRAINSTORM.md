@@ -59,11 +59,20 @@ The original `openaicouncil.py` is a single-file CLI that:
 
   The roster is deliberately multilingual/multicultural — figures who thought
   and wrote in Arabic, Greek, Chinese, French, German, Italian, Russian,
-  Hungarian and Serbian are all included (they are role-played in English, the
-  debate language, but retain their distinct worldview). New `master_tags.txt`
-  tags cover history, science, technology, physics, chemistry, biology,
-  mathematics, computing, engineering, medicine, ecology, geography and
-  philosophy.
+  Hungarian and Serbian are all included. New `master_tags.txt` tags cover
+  history, science, technology, physics, chemistry, biology, mathematics,
+  computing, engineering, medicine, ecology, geography and philosophy.
+- **[done] Native-language "code-switching"** (`council.py`,
+  `CODE_SWITCH_DIRECTIVE`). Non-English figures reason and argue in English (so
+  scoring stays fair and transcripts stay readable) but weave in their authentic
+  original-language key terms — e.g. Ibn Khaldun's *ʿaṣabiyyah* — glossing each
+  in English on first use. The judge is instructed to score substance and
+  neither reward nor penalise the code-switching. This was chosen over full
+  native-language debate, which degrades reasoning quality for classical/low
+  resource languages (Ancient Greek, Classical Chinese, medieval Arabic), risks
+  language-biased scoring, and roughly doubles cost via a translate-back step.
+  A future opt-in could enable true native-language generation + translation for
+  *modern*-language figures only.
 - **[done] Interview-driven persona builder** (`interview.py`). Generates probing
   questions, role-plays the figure's answers, and distils a rich
   `instructions.txt` + suggested tags — producing far more distinctive personas
