@@ -24,6 +24,9 @@ python council.py --topic "..." --model anthropic/claude-3.5-sonnet --tags econo
 # Bigger judging panel + reproducible run
 python council.py --topic "..." --judges 5 --seed 42
 
+# Debate the topic exactly as written (skip the debiasing rewrite)
+python council.py --topic "..." --no-neutralize
+
 # Or use OpenAI
 export OPENAI_API_KEY=sk-...
 python council.py --topic "..." --provider openai --model gpt-4o
@@ -33,6 +36,33 @@ Results are written to `results.json`: every idea, the full debate transcript
 with **per-judge votes**, each idea's **direct verdict score** (1–10 on its own
 merit, which is what the winner is ranked on), and the run's seed/model/judges
 for reproducibility.
+
+### Topic neutralisation & wording-sensitivity analysis
+
+The topic seeds the entire run, and question wording carries huge, often
+invisible influence (loaded terms, presuppositions, gain/loss framing). Two
+tools address this:
+
+- **Neutralisation** runs automatically before every council session: the topic
+  is rewritten as a neutral, open question (with detected issues recorded in
+  `results.json`), verified for neutrality, and used for the debate. Opt out with
+  `--no-neutralize`.
+- **`sensitivity.py`** runs the council across several wordings — a neutral
+  baseline, meaning-preserving **paraphrases**, and deliberately re-slanted
+  **reframes** — with the seed held fixed, then reports two things:
+  - **Lexical robustness** (baseline vs paraphrases): the answer *should* be
+    stable; if it moves, the result is noisy.
+  - **Framing sensitivity** (baseline vs reframes): if the answer moves, the
+    recommendation is an artifact of how the question was framed — a finding.
+
+```bash
+python sensitivity.py --topic "How do we stop kids wasting time online?" \
+    --paraphrases 2 --reframes 2 --ideas 2
+```
+
+Idea overlap is measured via embeddings where available, falling back to a
+lexical similarity. Note this runs the council once per wording, so cost scales
+with the number of variants — keep `--ideas`/`--judges` small for exploration.
 
 ### Building richer personalities via interviews
 

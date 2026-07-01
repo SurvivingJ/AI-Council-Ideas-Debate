@@ -337,6 +337,7 @@ class RunConfig:
     temperature: float = 0.8
     judges: int = 3
     seed: int | None = None
+    neutralize: bool = True
     output: str = "results.json"
 
 
@@ -359,6 +360,26 @@ class Council:
                 seed=run.seed,
             )
         )
+        # Optionally debias the topic before convening (see framing.py). The
+        # sensitivity orchestrator sets neutralize=False because it controls the
+        # exact wording of each variant itself.
+        self.neutralization = None
+        if run.neutralize:
+            from framing import neutralize_topic
+
+            self.neutralization = neutralize_topic(self.client, run.topic)
+            if self.neutralization.neutral_topic != run.topic:
+                print("Topic neutralised for debate:")
+                print(f"  original: {run.topic}")
+                print(f"  neutral : {self.neutralization.neutral_topic}")
+                if self.neutralization.detected_issues:
+                    issues = ", ".join(
+                        f"{i.get('span','?')} ({i.get('type','?')})"
+                        for i in self.neutralization.detected_issues
+                    )
+                    print(f"  issues  : {issues}")
+                self.run.topic = self.neutralization.neutral_topic
+
         self.personas = load_personas(run.tags, run.require_all)
         if not self.personas:
             raise SystemExit(
@@ -457,7 +478,7 @@ class Council:
             for e in entries
         )
 
-    def run_session(self) -> dict:
+    def run_session(self, write: bool = True) -> dict:
         started = time.time()
         all_ideas = self.gather_ideas()
 
@@ -481,6 +502,7 @@ class Council:
 
         result = {
             "topic": self.run.topic,
+            "neutralization": self.neutralization.to_dict() if self.neutralization else None,
             "provider": self.run.provider,
             "model": self.client.model,
             "seed": self.run.seed,
@@ -493,8 +515,9 @@ class Council:
             "elapsed_seconds": round(time.time() - started, 1),
         }
 
-        with open(self.run.output, "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
+        if write:
+            with open(self.run.output, "w", encoding="utf-8") as f:
+                json.dump(result, f, indent=2, ensure_ascii=False)
 
         print("\n" + "=" * 60)
         if best:
@@ -504,7 +527,8 @@ class Council:
                 f"\n[verdict {best['verdict_score']:.1f}/10 | debate substance: "
                 f"for {best['for_score']:.0f}, against {best['against_score']:.0f}]"
             )
-        print(f"\nFull results written to {self.run.output}")
+        if write:
+            print(f"\nFull results written to {self.run.output}")
         print("=" * 60)
         return result
 
@@ -548,6 +572,12 @@ def parse_args() -> RunConfig:
         default=None,
         help="Seed for reproducibility (recorded and sent to the API).",
     )
+    p.add_argument(
+        "--no-neutralize",
+        dest="neutralize",
+        action="store_false",
+        help="Debate the topic exactly as given (skip the debiasing rewrite).",
+    )
     p.add_argument("--temperature", type=float, default=0.8)
     p.add_argument("--output", default="results.json")
     args = p.parse_args()
@@ -563,6 +593,7 @@ def parse_args() -> RunConfig:
         temperature=args.temperature,
         judges=args.judges,
         seed=args.seed,
+        neutralize=args.neutralize,
         output=args.output,
     )
 

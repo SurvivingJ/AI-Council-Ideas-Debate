@@ -93,6 +93,15 @@ The original `openaicouncil.py` is a single-file CLI that:
 - **[done] Reproducibility.** A `--seed` seeds the RNG and is forwarded to the API
   (`seed` param) for best-effort determinism, and is recorded in `results.json`
   alongside model, temperature, members and judges.
+- **[done] Topic neutralisation + wording-sensitivity analysis** (`framing.py`,
+  `sensitivity.py`). Every run first debiases the topic into a neutral, open
+  question (loaded terms/presuppositions detected and recorded; neutrality
+  verified; `--no-neutralize` opts out). `sensitivity.py` runs the council across
+  a neutral baseline plus meaning-preserving **paraphrases** and deliberately
+  re-slanted **reframes** (seed fixed), separating **lexical robustness** (answer
+  should be stable under paraphrase — instability is noise) from **framing
+  sensitivity** (answer moving under reframing is a genuine finding). Idea
+  overlap uses embeddings with a lexical fallback.
 - **[done] `requirements.txt`** and expanded `master_tags.txt`.
 
 ---

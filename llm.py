@@ -33,6 +33,14 @@ DEFAULT_MODELS = {
     "openai": "gpt-4o-mini",
 }
 
+# Default embedding models (used for idea-overlap in the sensitivity analysis).
+# OpenRouter embedding coverage varies, so callers should degrade gracefully if
+# embed() raises.
+DEFAULT_EMBED_MODELS = {
+    "openrouter": "openai/text-embedding-3-small",
+    "openai": "text-embedding-3-small",
+}
+
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
@@ -129,3 +137,14 @@ class LLMClient:
                 time.sleep(delay)
                 delay *= 2
         raise RuntimeError(f"LLM request failed after retries: {last_err}")
+
+    def embed(self, texts: list[str], model: str | None = None) -> list[list[float]]:
+        """Embed a list of texts. May raise if the provider/model lacks embedding
+        support; callers should fall back to a lexical similarity in that case."""
+        emb_model = (
+            model
+            or os.environ.get(f"{self.config.provider.upper()}_EMBED_MODEL")
+            or DEFAULT_EMBED_MODELS[self.config.provider]
+        )
+        resp = self.client.embeddings.create(model=emb_model, input=texts)
+        return [d.embedding for d in resp.data]
