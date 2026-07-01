@@ -129,10 +129,13 @@ The original `openaicouncil.py` is a single-file CLI that:
 - **[done] De-duplication / clustering of ideas.** Generated ideas are embedded
   and greedily clustered (`similarity.py`) to drop near-duplicates before the
   expensive debate phase; `--dedupe-threshold` tunes it, `--no-dedupe` disables.
-- **Retrieval / RAG for knowledge files.** The old app fed each member's `Files/`
-  (Buffett's shareholder letters, Keynes' *General Theory*, etc.) via Assistants
-  retrieval. Re-add this with a vendor-neutral RAG step (embed the PDFs, retrieve
-  top-k chunks, inject into the system prompt) so members cite their own corpus.
+- **[done] Retrieval / RAG for knowledge files** (`rag.py`). Each member's `Files/`
+  corpus (`.txt`/`.md`/`.pdf` via pdfminer.six) is chunked and embedded (cached),
+  and the passages most relevant to the question are retrieved and injected into
+  the member's prompt so they argue from their own corpus (`--rag-k`, `--no-rag`).
+  The new history/science/technology members and newer economists were given
+  curated `key_ideas.md` reference digests (their primary texts are under
+  copyright / unavailable offline); see `CouncilMembers/CORPUS.md`.
 - **[done] Cost & token accounting.** Per-run tokens and an estimated USD cost are
   accumulated from the API usage field and recorded/printed; pricing is
   extensible via `LLM_PRICING_JSON`.
@@ -194,11 +197,11 @@ The original `openaicouncil.py` is a single-file CLI that:
 
 ## Suggested next milestone
 
-The result-quality bundle (multi-judge panel, direct idea verdict, seed) and the
-full Tier 2 practicality bundle (concurrency, de-dup, caching, cost accounting)
-are **done**. Remaining high-value work, in order:
+The result-quality bundle (multi-judge panel, direct idea verdict, seed), the
+full Tier 2 practicality bundle (concurrency, de-dup, caching, cost accounting),
+and RAG over member corpora are **done**. Remaining high-value work, in order:
 
-1. RAG over each member's `Files/` corpus (biggest authenticity/quality jump —
-   the embedding + similarity infra is now already in place to build on).
-2. Multi-dimensional rubric (novelty/feasibility/evidence/logic/risk).
-3. Streamlit UI over `results.json` (biggest UX win).
+1. Multi-dimensional rubric (novelty/feasibility/evidence/logic/risk), weighted.
+2. Streamlit/web UI over `results.json` (biggest UX win).
+3. Structured multi-round debate + persona knowledge cards.
+4. Add real primary texts for the curated members (drop into their `Files/`).

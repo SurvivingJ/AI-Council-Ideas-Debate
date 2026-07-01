@@ -145,17 +145,41 @@ CODE_SWITCH_DIRECTIVE = (
 
 
 class Member:
-    """A persona that argues one side and remembers its own contributions."""
+    """A persona that argues one side and remembers its own contributions.
 
-    def __init__(self, persona: Persona, side: Side, client: LLMClient):
+    If given a ``retriever`` (a ``rag.CorpusIndex``), each prompt is augmented
+    with the passages from the member's own writings most relevant to the query,
+    so arguments are grounded in that member's corpus.
+    """
+
+    def __init__(self, persona: Persona, side: Side, client: LLMClient,
+                 retriever=None, rag_k: int = 4):
         self.persona = persona
         self.side = side
         self.client = client
+        self.retriever = retriever
+        self.rag_k = rag_k
         system_prompt = persona.instructions + CODE_SWITCH_DIRECTIVE
         self.history: list[dict] = [{"role": "system", "content": system_prompt}]
 
-    def _ask(self, prompt: str) -> str:
-        self.history.append({"role": "user", "content": prompt})
+    def _augment(self, prompt: str, query: str) -> str:
+        if not self.retriever:
+            return prompt
+        chunks = self.retriever.retrieve(query, self.rag_k)
+        if not chunks:
+            return prompt
+        refs = "\n---\n".join(f"[{c.source}] {c.text}" for c in chunks)
+        return (
+            "Relevant passages retrieved from your reference corpus (your own "
+            "writings and notes on your ideas). Ground your response in these "
+            "where apt, drawing on their specific ideas and language (do not "
+            "quote at length):\n\"\"\"\n"
+            f"{refs}\n\"\"\"\n\n{prompt}"
+        )
+
+    def _ask(self, prompt: str, query: str | None = None) -> str:
+        content = self._augment(prompt, query) if query else prompt
+        self.history.append({"role": "user", "content": content})
         reply = self.client.chat(self.history)
         self.history.append({"role": "assistant", "content": reply})
         return reply
@@ -168,7 +192,7 @@ class Member:
             "address this topic. Give it a short title, then 3-5 sentences of "
             "explanation grounded in your worldview."
         )
-        return self._ask(prompt)
+        return self._ask(prompt, query=topic)
 
     def argue(self, topic: str, idea: str) -> str:
         stance = "argue in favour of" if self.side is Side.FOR else "argue against"
@@ -177,7 +201,7 @@ class Member:
             f"Using your expertise, {stance} this idea. Be concise, concrete "
             "and persuasive. Lead with your strongest point."
         )
-        return self._ask(prompt)
+        return self._ask(prompt, query=f"{topic} {idea}")
 
     def rebut(self, topic: str, idea: str, opponent_arg: str) -> str:
         prompt = (
@@ -186,7 +210,7 @@ class Member:
             "Write a sharp, concise rebuttal from your side that exposes the "
             "weaknesses in their reasoning while reinforcing your position."
         )
-        return self._ask(prompt)
+        return self._ask(prompt, query=f"{topic} {idea} {opponent_arg}")
 
 
 # --------------------------------------------------------------------------- #
@@ -357,6 +381,8 @@ class RunConfig:
     dedupe: bool = True
     dedupe_threshold: float = 0.85
     cache: bool = True
+    rag: bool = True
+    rag_k: int = 4
     output: str = "results.json"
 
 
@@ -415,10 +441,41 @@ class Council:
         )
         print("Members: " + ", ".join(p.name for p in self.personas))
 
+        # Build a retrieval index over each member's Files/ corpus, once, up
+        # front (embeddings are cached, so re-runs are cheap). Parallelised.
+        self.retrievers: dict[str, object] = {}
+        if run.rag:
+            from rag import build_index
+
+            def _index(persona: Persona):
+                idx = build_index(
+                    os.path.join(MEMBERS_DIR, persona.name), self.client, persona.name
+                )
+                return persona.name, idx
+
+            for name, idx in pmap(_index, self.personas, run.concurrency):
+                if idx is not None:
+                    self.retrievers[name] = idx
+            if self.retrievers:
+                total_chunks = sum(len(r.chunks) for r in self.retrievers.values())
+                print(
+                    f"RAG: indexed {len(self.retrievers)} member corpora "
+                    f"({total_chunks} chunks)"
+                )
+
+    def _make_member(self, persona: Persona, side: Side) -> "Member":
+        return Member(
+            persona,
+            side,
+            self.client,
+            retriever=self.retrievers.get(persona.name),
+            rag_k=self.run.rag_k,
+        )
+
     # -- idea generation --------------------------------------------------- #
     def gather_ideas(self) -> list[dict]:
         def one(persona: Persona) -> dict:
-            member = Member(persona, Side.FOR, self.client)
+            member = self._make_member(persona, Side.FOR)
             return {"author": persona.name, "idea": member.generate_idea(self.run.topic)}
 
         ideas = pmap(one, self.personas, self.run.concurrency)
@@ -457,8 +514,8 @@ class Council:
     def evaluate_idea(self, idea: str) -> dict:
         # Phase 1: every member debates (independent across members) -> fan out.
         def debate(persona: Persona) -> list[dict]:
-            pro = Member(persona, Side.FOR, self.client)
-            con = Member(persona, Side.AGAINST, self.client)
+            pro = self._make_member(persona, Side.FOR)
+            con = self._make_member(persona, Side.AGAINST)
             pro_arg = pro.argue(self.run.topic, idea)
             con_arg = con.argue(self.run.topic, idea)
             pro_rebut = pro.rebut(self.run.topic, idea, con_arg)
@@ -557,6 +614,13 @@ class Council:
             "temperature": self.run.temperature,
             "members": [p.name for p in self.personas],
             "judges": self.panel.names,
+            "rag": {
+                "enabled": self.run.rag,
+                "k": self.run.rag_k,
+                "indexed_members": {
+                    name: len(r.chunks) for name, r in self.retrievers.items()
+                },
+            },
             "all_ideas": all_ideas,
             "dedupe": dedupe_info,
             "evaluations": evaluations,
@@ -660,6 +724,18 @@ def parse_args() -> RunConfig:
         action="store_false",
         help="Disable the on-disk response cache.",
     )
+    p.add_argument(
+        "--no-rag",
+        dest="rag",
+        action="store_false",
+        help="Skip retrieval over member Files/ corpora.",
+    )
+    p.add_argument(
+        "--rag-k",
+        type=int,
+        default=4,
+        help="Passages retrieved from a member's corpus per prompt (default: 4).",
+    )
     p.add_argument("--temperature", type=float, default=0.8)
     p.add_argument("--output", default="results.json")
     args = p.parse_args()
@@ -680,6 +756,8 @@ def parse_args() -> RunConfig:
         dedupe=args.dedupe,
         dedupe_threshold=args.dedupe_threshold,
         cache=args.cache,
+        rag=args.rag,
+        rag_k=args.rag_k,
         output=args.output,
     )
 

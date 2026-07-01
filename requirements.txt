@@ -1,6 +1,11 @@
 # Core: OpenAI-compatible client (works with OpenAI and OpenRouter)
 openai>=1.30.0
 
+# RAG: extract text from members' PDF corpora. pdfminer.six is pure-Python.
+# (cffi provides the _cffi_backend that pdfminer's cryptography dependency needs.)
+pdfminer.six>=20221105
+cffi>=1.15
+
 # Optional: only needed by the legacy openaicouncil.py sentiment scoring.
 # The new council.py uses rubric-based numeric scoring and does not require it.
 nltk>=3.8

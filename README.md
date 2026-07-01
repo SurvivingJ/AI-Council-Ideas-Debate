@@ -50,6 +50,28 @@ identical requests are served from an on-disk **cache** so re-runs and
 development don't pay twice. Token usage and an estimated cost are printed and
 recorded (extend/override the pricing table with a `LLM_PRICING_JSON` env var).
 
+### Retrieval-augmented members (RAG over their own corpora)
+
+Each member folder can hold a `Files/` corpus (`.txt`/`.md`/`.pdf`). Before a
+run, `rag.py` reads, chunks and embeds each member's files (embeddings cached on
+disk), and during the debate it retrieves the passages most relevant to the
+question and injects them into that member's prompt — so, e.g., Keynes argues
+from *The General Theory* and Ostrom from her design principles. Members without
+a corpus simply skip retrieval; PDF text is extracted with `pdfminer.six`.
+
+```bash
+python council.py --topic "..." --rag-k 6     # retrieve 6 passages per prompt
+python council.py --topic "..." --no-rag      # disable retrieval
+```
+
+Sourcing note: the original members ship with **primary texts** (Smith's *Wealth
+of Nations*, Marx's *Capital*, Buffett's letters, …). The members added later
+(the history/science/technology figures and newer economists) instead have
+**curated reference notes** (`key_ideas.md`) — accurate digests of their major
+works, since their primary texts are under copyright or unavailable offline. See
+[`CouncilMembers/CORPUS.md`](CouncilMembers/CORPUS.md) for the full breakdown and
+how to drop in real texts.
+
 ### Topic neutralisation & wording-sensitivity analysis
 
 The topic seeds the entire run, and question wording carries huge, often
