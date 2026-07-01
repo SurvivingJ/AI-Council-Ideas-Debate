@@ -3,6 +3,25 @@ A system of LLM based bots to generate ideas and subsequently evaluate their log
 
 ---
 
+## Web UI
+
+A [Streamlit](https://streamlit.io) front end wraps the whole pipeline:
+
+```bash
+pip install -r requirements.txt
+export OPENROUTER_API_KEY=sk-or-...
+streamlit run app.py
+```
+
+Configure a run in the sidebar — topic, provider/model, roster tag filters (with
+a live member count), number of ideas and judges, seed, concurrency, RAG, and
+**rubric-axis weight sliders** — then press **▶ Run council**. The main panel
+shows the neutralised topic and detected framing issues, the best idea with its
+multi-axis rubric breakdown, an idea-verdict comparison, the full debate
+transcript, de-duplication and retrieval details, and a usage/cost summary. You
+can also upload a previous `results.json` to browse it without re-running, and
+download results back out.
+
 ## Quickstart (new `council.py`)
 
 The modern entry point is `council.py`. It talks to the **OpenAI-compatible Chat

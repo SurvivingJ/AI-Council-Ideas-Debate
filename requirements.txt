@@ -6,6 +6,9 @@ openai>=1.30.0
 pdfminer.six>=20221105
 cffi>=1.15
 
+# Web UI (streamlit run app.py). Pulls in pandas + altair for charts.
+streamlit>=1.30
+
 # Optional: only needed by the legacy openaicouncil.py sentiment scoring.
 # The new council.py uses rubric-based numeric scoring and does not require it.
 nltk>=3.8

@@ -177,10 +177,14 @@ The original `openaicouncil.py` is a single-file CLI that:
 
 ## 6. UI improvements
 
-- **Web UI (recommended next step).** A small **Streamlit** or **FastAPI + React**
-  front end: enter a topic, pick provider/model and tags, watch ideas and the
-  debate stream in live, and browse the scored transcript. `results.json` is
-  already shaped to drive this directly.
+- **[done] Web UI** (`app.py`, Streamlit). Configure a run in the sidebar (topic,
+  provider/model, roster tag filters with live member count, ideas, judges, seed,
+  concurrency, RAG, rubric-weight sliders) and launch it, or upload a previous
+  `results.json` to browse. Renders the neutralised topic + detected issues, the
+  best idea with its multi-axis rubric chart, an idea-verdict comparison, the full
+  transcript, de-dup/RAG details, and a usage/cost summary. Charts follow the
+  data-viz palette (single accessible hue, recessive axes, direct value labels,
+  winner marked by label not colour).
 - **Streaming output** so the user sees arguments as they generate rather than
   waiting for the whole run.
 - **Interactive member/tag picker** (checkbox list from `master_tags.txt`) instead
@@ -204,9 +208,11 @@ The original `openaicouncil.py` is a single-file CLI that:
 
 The result-quality bundle (multi-judge panel, direct idea verdict, seed), the
 full Tier 2 practicality bundle (concurrency, de-dup, caching, cost accounting),
-RAG over member corpora, and the weighted multi-axis rubric are **done**.
-Remaining high-value work, in order:
+RAG over member corpora, the weighted multi-axis rubric, and the Streamlit web
+UI are **done**. Remaining high-value work, in order:
 
-1. Streamlit/web UI over `results.json` (biggest UX win).
-2. Structured multi-round debate + persona knowledge cards.
-3. Add real primary texts for the curated members (drop into their `Files/`).
+1. Structured multi-round debate (opening → cross-examination → closing).
+2. Persona knowledge cards + interview depth knobs.
+3. Streaming output in the UI (show ideas/debate as they generate) + a
+   sensitivity-analysis view.
+4. Add real primary texts for the curated members (drop into their `Files/`).
