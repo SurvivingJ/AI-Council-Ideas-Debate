@@ -26,6 +26,7 @@ Run ``python council.py --help`` for all options.
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import os
 import random
@@ -435,8 +436,13 @@ _TOP_ARGS_PER_SIDE = 3
 
 
 class Council:
-    def __init__(self, run: RunConfig):
+    def __init__(self, run: RunConfig, progress_cb=None):
         self.run = run
+        # Optional progress sink: called with {"type": "progress", "frac": 0..1,
+        # "msg": str}. Used by the web UI to stream live progress. Thread-safe by
+        # contract (the UI pushes events onto a queue), so it is safe to call
+        # from the internal thread pool.
+        self._progress_cb = progress_cb or (lambda ev: None)
         # Reproducibility: seed Python RNG and forward the seed to the API.
         if run.seed is not None:
             random.seed(run.seed)
@@ -456,6 +462,7 @@ class Council:
         if run.neutralize:
             from framing import neutralize_topic
 
+            self._progress(0.02, "Neutralising the topic…")
             self.neutralization = neutralize_topic(self.client, run.topic)
             if self.neutralization.neutral_topic != run.topic:
                 print("Topic neutralised for debate:")
@@ -495,6 +502,8 @@ class Council:
         if run.rag:
             from rag import build_index
 
+            self._progress(0.05, "Indexing member corpora (RAG)…")
+
             def _index(persona: Persona):
                 idx = build_index(
                     os.path.join(MEMBERS_DIR, persona.name), self.client, persona.name
@@ -510,6 +519,10 @@ class Council:
                     f"RAG: indexed {len(self.retrievers)} member corpora "
                     f"({total_chunks} chunks)"
                 )
+        self._progress(0.10, f"Convened {len(self.personas)} members")
+
+    def _progress(self, frac: float, msg: str) -> None:
+        self._progress_cb({"type": "progress", "frac": max(0.0, min(frac, 0.99)), "msg": msg})
 
     def _make_member(self, persona: Persona, side: Side) -> "Member":
         return Member(
@@ -522,9 +535,15 @@ class Council:
 
     # -- idea generation --------------------------------------------------- #
     def gather_ideas(self) -> list[dict]:
+        n = len(self.personas)
+        done = itertools.count(1)  # count().__next__ is atomic in CPython
+
         def one(persona: Persona) -> dict:
             member = self._make_member(persona, Side.FOR)
-            return {"author": persona.name, "idea": member.generate_idea(self.run.topic)}
+            idea = member.generate_idea(self.run.topic)
+            i = next(done)
+            self._progress(0.10 + 0.25 * i / n, f"Gathering ideas… {i}/{n}")
+            return {"author": persona.name, "idea": idea}
 
         ideas = pmap(one, self.personas, self.run.concurrency)
         for item in ideas:
@@ -559,7 +578,13 @@ class Council:
         return unique, info
 
     # -- debate & scoring -------------------------------------------------- #
-    def evaluate_idea(self, idea: str) -> dict:
+    def evaluate_idea(self, idea: str, pos: tuple[int, int] = (0, 1)) -> dict:
+        # Map this idea's work into the [0.38, 0.98] progress band.
+        j, m = pos
+        base, span = 0.38 + 0.60 * (j / m), 0.60 / m
+        p = len(self.personas)
+        done = itertools.count(1)
+
         # Phase 1: every member debates (independent across members) -> fan out.
         def debate(persona: Persona) -> list[dict]:
             pro = self._make_member(persona, Side.FOR)
@@ -568,6 +593,9 @@ class Council:
             con_arg = con.argue(self.run.topic, idea)
             pro_rebut = pro.rebut(self.run.topic, idea, con_arg)
             con_rebut = con.rebut(self.run.topic, idea, pro_arg)
+            k = next(done)
+            self._progress(base + span * 0.7 * k / p,
+                           f"Idea {j + 1}/{m}: debated {k}/{p} members")
             return [
                 {"member": persona.name, "type": "for_arg", "side": "for", "argument": pro_arg},
                 {"member": persona.name, "type": "against_arg", "side": "against", "argument": con_arg},
@@ -579,6 +607,8 @@ class Council:
         entries = [e for sub in per_member for e in sub]
 
         # Phase 2: score every argument (independent) -> fan out.
+        self._progress(base + span * 0.8, f"Idea {j + 1}/{m}: scoring arguments…")
+
         def score(entry: dict) -> dict:
             verdict = self.panel.score_argument(self.run.topic, idea, entry["argument"])
             return {**entry, "score": verdict["aggregate"], "judge_votes": verdict["votes"]}
@@ -596,6 +626,8 @@ class Council:
             self.run.topic, idea, for_case, against_case, self.rubric
         )
         axes_str = " ".join(f"{k}={v:.0f}" for k, v in idea_verdict["axes"].items())
+        self._progress(base + span * 0.98,
+                       f"Idea {j + 1}/{m}: verdict {idea_verdict['overall']:.1f}/10")
         print(
             f"  for={for_total:.0f} against={against_total:.0f} "
             f"-> verdict {idea_verdict['overall']:.1f}/10  [{axes_str}]"
@@ -635,6 +667,7 @@ class Council:
         dedupe_info = None
         candidates = all_ideas
         if self.run.dedupe and len(all_ideas) > 1:
+            self._progress(0.36, "De-duplicating ideas…")
             candidates, dedupe_info = self.dedupe_ideas(all_ideas)
 
         # Evaluate a subset (deterministic: the first N distinct ideas).
@@ -643,9 +676,9 @@ class Council:
         print(f"\nEvaluating {n} of {len(candidates)} distinct ideas...\n")
 
         evaluations = []
-        for item in selected:
+        for j, item in enumerate(selected):
             print(f"=== Debating idea by {item['author']} ===")
-            evaluations.append(self.evaluate_idea(item["idea"]))
+            evaluations.append(self.evaluate_idea(item["idea"], pos=(j, n)))
 
         # Best idea = highest direct verdict on the idea's own merit; the total
         # argument quality is a tie-breaker (how much substance the debate had).

@@ -185,8 +185,10 @@ The original `openaicouncil.py` is a single-file CLI that:
   transcript, de-dup/RAG details, and a usage/cost summary. Charts follow the
   data-viz palette (single accessible hue, recessive axes, direct value labels,
   winner marked by label not colour).
-- **Streaming output** so the user sees arguments as they generate rather than
-  waiting for the whole run.
+- **[done] Streaming progress** — a live `st.status` panel streams each phase
+  (indexing, gathering ideas, debating member-by-member, scoring, verdicts) via a
+  `Council` `progress_cb` drained on the main thread. (Streaming the argument
+  *text* token-by-token is still a further step.)
 - **Interactive member/tag picker** (checkbox list from `master_tags.txt`) instead
   of numeric console prompts.
 - **Shareable result pages** and export to PDF/Markdown.
@@ -213,6 +215,11 @@ UI are **done**. Remaining high-value work, in order:
 
 1. Structured multi-round debate (opening → cross-examination → closing).
 2. Persona knowledge cards + interview depth knobs.
-3. Streaming output in the UI (show ideas/debate as they generate) + a
-   sensitivity-analysis view.
+3. A sensitivity-analysis view in the UI (there is already a `sensitivity.json`).
 4. Add real primary texts for the curated members (drop into their `Files/`).
+
+**[done] Live streaming progress in the UI** — `Council` accepts a `progress_cb`
+that emits fraction+message events at each phase (index → gather → dedupe →
+per-member debate → scoring → verdict); the UI runs the council in a background
+thread that pushes events onto a queue, and the main thread drains it into a live
+`st.status` progress panel (thread-safe: only the main thread touches widgets).

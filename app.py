@@ -11,11 +11,10 @@ transcript, and the usage/cost summary.
 
 from __future__ import annotations
 
-import contextlib
-import dataclasses
-import io
 import json
 import os
+import queue
+import threading
 
 import altair as alt
 import pandas as pd
@@ -227,18 +226,44 @@ def sidebar() -> RunConfig | None:
 
 
 def run_council(cfg: RunConfig) -> None:
-    log = io.StringIO()
-    try:
-        with st.spinner("Convening the council… this can take a few minutes for a large roster."):
-            with contextlib.redirect_stdout(log):
-                result = Council(cfg).run_session(write=False)
-    except Exception as err:  # noqa: BLE001 - surface config/API errors in the UI
-        st.error(f"Run failed: {err}")
-        with st.expander("Log"):
-            st.code(log.getvalue() or "(no output)")
-        return
-    st.session_state["result"] = result
-    st.session_state["log"] = log.getvalue()
+    """Run the council in a background thread, streaming live progress.
+
+    The worker thread only pushes progress events onto a queue and never touches
+    Streamlit; the main thread drains the queue and updates the widgets, so this
+    is safe despite the council's internal thread pool.
+    """
+    q: queue.Queue = queue.Queue()
+    holder: dict = {}
+
+    def worker() -> None:
+        try:
+            holder["result"] = Council(
+                cfg, progress_cb=lambda ev: q.put(ev)
+            ).run_session(write=False)
+            q.put({"type": "done"})
+        except Exception as err:  # noqa: BLE001 - report config/API errors in UI
+            q.put({"type": "error", "msg": str(err)})
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    with st.status("Convening the council…", expanded=True) as status:
+        bar = st.progress(0.0)
+        line = st.empty()
+        while True:
+            ev = q.get()
+            if ev["type"] == "progress":
+                bar.progress(ev["frac"])
+                line.markdown(f"*{ev['msg']}*")
+                status.update(label=ev["msg"])
+            elif ev["type"] == "done":
+                bar.progress(1.0)
+                status.update(label="Council finished", state="complete", expanded=False)
+                break
+            else:  # error
+                status.update(label="Run failed", state="error")
+                st.error(ev["msg"])
+                return
+    st.session_state["result"] = holder.get("result")
 
 
 def main() -> None:
@@ -246,11 +271,8 @@ def main() -> None:
     if cfg is not None:
         run_council(cfg)
 
-    if "result" in st.session_state:
+    if st.session_state.get("result"):
         render_result(st.session_state["result"])
-        if st.session_state.get("log"):
-            with st.expander("Run log"):
-                st.code(st.session_state["log"])
     else:
         st.title("🏛️ AI Council")
         st.markdown(
