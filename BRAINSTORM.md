@@ -129,8 +129,11 @@ The original `openaicouncil.py` is a single-file CLI that:
 - **[done] Score the *idea*, not just the arguments.** Ideas are ranked by a direct
   post-debate verdict on the idea's own merit (informed by the strongest points
   each side made); total argument quality is now only a tie-breaker.
-- **Structured debate rounds.** Opening → cross-examination → closing, with a
-  configurable number of rounds, instead of a single arg+rebut exchange.
+- **[done] Structured debate rounds.** Each member now debates as opening
+  statement → `--rounds` cross-examination rounds (each rebutting the opponent's
+  latest turn, with memory) → optional closing statement (`--no-closing`),
+  instead of a single arg+rebut exchange. Every turn is a scored transcript
+  entry; the debate shape is recorded in `results.json` and exposed in the UI.
 - **[done] De-duplication / clustering of ideas.** Generated ideas are embedded
   and greedily clustered (`similarity.py`) to drop near-duplicates before the
   expensive debate phase; `--dedupe-threshold` tunes it, `--no-dedupe` disables.
@@ -213,9 +216,9 @@ full Tier 2 practicality bundle (concurrency, de-dup, caching, cost accounting),
 RAG over member corpora, the weighted multi-axis rubric, and the Streamlit web
 UI are **done**. Remaining high-value work, in order:
 
-1. Structured multi-round debate (opening → cross-examination → closing).
-2. Persona knowledge cards + interview depth knobs.
-3. A sensitivity-analysis view in the UI (there is already a `sensitivity.json`).
+1. Persona knowledge cards + interview depth knobs.
+2. A sensitivity-analysis view in the UI (there is already a `sensitivity.json`).
+3. Token-level streaming of argument text in the UI.
 4. Add real primary texts for the curated members (drop into their `Files/`).
 
 **[done] Live streaming progress in the UI** — `Council` accepts a `progress_cb`

@@ -48,6 +48,9 @@ python council.py --topic "..." --judges 5 --seed 42
 # Re-weight the idea rubric (axes: novelty, feasibility, evidence, logic, risk)
 python council.py --topic "..." --weights "novelty=2,feasibility=1.5"
 
+# Longer structured debate: opening -> N cross-examination rounds -> closing
+python council.py --topic "..." --rounds 3          # or --no-closing to skip closings
+
 # Debate the topic exactly as written (skip the debiasing rewrite)
 python council.py --topic "..." --no-neutralize
 

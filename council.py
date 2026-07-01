@@ -196,22 +196,37 @@ class Member:
         return self._ask(prompt, query=topic)
 
     def argue(self, topic: str, idea: str) -> str:
+        """Opening statement for this member's side."""
         stance = "argue in favour of" if self.side is Side.FOR else "argue against"
         prompt = (
             f"Topic: {topic}\nIdea under debate: {idea}\n\n"
-            f"Using your expertise, {stance} this idea. Be concise, concrete "
-            "and persuasive. Lead with your strongest point."
+            f"This is your OPENING STATEMENT. Using your expertise, {stance} this "
+            "idea. Be concise, concrete and persuasive. Lead with your strongest "
+            "point."
         )
         return self._ask(prompt, query=f"{topic} {idea}")
 
     def rebut(self, topic: str, idea: str, opponent_arg: str) -> str:
+        """Cross-examination turn: rebut the opponent's latest statement."""
         prompt = (
             f"Topic: {topic}\nIdea under debate: {idea}\n\n"
-            f"Your opponent argued:\n\"{opponent_arg}\"\n\n"
-            "Write a sharp, concise rebuttal from your side that exposes the "
-            "weaknesses in their reasoning while reinforcing your position."
+            f"Your opponent just argued:\n\"{opponent_arg}\"\n\n"
+            "Cross-examine them: write a sharp, concise rebuttal from your side "
+            "that exposes the weaknesses in their reasoning while reinforcing your "
+            "position. Engage their specific points; do not merely repeat yourself."
         )
         return self._ask(prompt, query=f"{topic} {idea} {opponent_arg}")
+
+    def closing(self, topic: str, idea: str) -> str:
+        """Closing statement, drawing on the member's own debate history."""
+        favour = "should be adopted" if self.side is Side.FOR else "should be rejected"
+        prompt = (
+            f"Topic: {topic}\nIdea under debate: {idea}\n\n"
+            "This is your CLOSING STATEMENT. Weighing the debate so far, deliver "
+            f"the single most compelling reason the idea {favour}. Be brief and "
+            "decisive; consolidate your case rather than introducing weak new points."
+        )
+        return self._ask(prompt, query=f"{topic} {idea}")
 
 
 # --------------------------------------------------------------------------- #
@@ -418,6 +433,8 @@ class RunConfig:
     model: str | None = None
     temperature: float = 0.8
     judges: int = 3
+    rounds: int = 1
+    closing: bool = True
     seed: int | None = None
     neutralize: bool = True
     concurrency: int = 8
@@ -585,23 +602,41 @@ class Council:
         p = len(self.personas)
         done = itertools.count(1)
 
-        # Phase 1: every member debates (independent across members) -> fan out.
+        # Phase 1: a structured debate per member (independent across members ->
+        # fan out): opening statements, then `rounds` cross-examination rounds,
+        # then optional closing statements. Each member keeps its own memory, so
+        # later turns build on earlier ones.
+        topic = self.run.topic
+        rounds = max(1, self.run.rounds)
+
         def debate(persona: Persona) -> list[dict]:
             pro = self._make_member(persona, Side.FOR)
             con = self._make_member(persona, Side.AGAINST)
-            pro_arg = pro.argue(self.run.topic, idea)
-            con_arg = con.argue(self.run.topic, idea)
-            pro_rebut = pro.rebut(self.run.topic, idea, con_arg)
-            con_rebut = con.rebut(self.run.topic, idea, pro_arg)
+            out: list[dict] = []
+
+            def add(label: str, side: str, text: str) -> None:
+                out.append({"member": persona.name, "type": label, "side": side, "argument": text})
+
+            last_for = pro.argue(topic, idea)
+            last_against = con.argue(topic, idea)
+            add("opening", "for", last_for)
+            add("opening", "against", last_against)
+
+            for r in range(1, rounds + 1):
+                pro_r = pro.rebut(topic, idea, last_against)
+                con_r = con.rebut(topic, idea, last_for)
+                add(f"rebuttal_{r}", "for", pro_r)
+                add(f"rebuttal_{r}", "against", con_r)
+                last_for, last_against = pro_r, con_r
+
+            if self.run.closing:
+                add("closing", "for", pro.closing(topic, idea))
+                add("closing", "against", con.closing(topic, idea))
+
             k = next(done)
             self._progress(base + span * 0.7 * k / p,
                            f"Idea {j + 1}/{m}: debated {k}/{p} members")
-            return [
-                {"member": persona.name, "type": "for_arg", "side": "for", "argument": pro_arg},
-                {"member": persona.name, "type": "against_arg", "side": "against", "argument": con_arg},
-                {"member": persona.name, "type": "for_rebuttal", "side": "for", "argument": pro_rebut},
-                {"member": persona.name, "type": "against_rebuttal", "side": "against", "argument": con_rebut},
-            ]
+            return out
 
         per_member = pmap(debate, self.personas, self.run.concurrency)
         entries = [e for sub in per_member for e in sub]
@@ -697,6 +732,7 @@ class Council:
             "temperature": self.run.temperature,
             "members": [p.name for p in self.personas],
             "judges": self.panel.names,
+            "debate": {"rounds": self.run.rounds, "closing": self.run.closing},
             "rubric": [{"axis": a.name, "weight": a.weight} for a in self.rubric],
             "rag": {
                 "enabled": self.run.rag,
@@ -796,6 +832,18 @@ def parse_args() -> RunConfig:
         help="Size of the judging panel (default: 3; scores are the median).",
     )
     p.add_argument(
+        "--rounds",
+        type=int,
+        default=1,
+        help="Cross-examination rounds after the opening statements (default: 1).",
+    )
+    p.add_argument(
+        "--no-closing",
+        dest="closing",
+        action="store_false",
+        help="Skip closing statements.",
+    )
+    p.add_argument(
         "--seed",
         type=int,
         default=None,
@@ -864,6 +912,8 @@ def parse_args() -> RunConfig:
         model=args.model,
         temperature=args.temperature,
         judges=args.judges,
+        rounds=args.rounds,
+        closing=args.closing,
         seed=args.seed,
         neutralize=args.neutralize,
         concurrency=args.concurrency,

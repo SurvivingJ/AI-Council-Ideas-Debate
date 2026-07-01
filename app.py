@@ -184,8 +184,11 @@ def sidebar() -> RunConfig | None:
     c1, c2 = st.sidebar.columns(2)
     ideas = c1.slider("Ideas", 1, 10, 3)
     judges = c2.slider("Judges", 1, 5, 3)
-    concurrency = c1.slider("Concurrency", 1, 32, 8)
+    rounds = c1.slider("Debate rounds", 1, 4, 1,
+                       help="Cross-examination rounds after the opening statements.")
     rag_k = c2.slider("RAG passages", 0, 10, 4)
+    concurrency = c1.slider("Concurrency", 1, 32, 8)
+    closing = c2.checkbox("Closing", value=True, help="Include closing statements.")
 
     use_seed = st.sidebar.checkbox("Fixed seed (reproducible)", value=True)
     seed = st.sidebar.number_input("Seed", value=0, step=1) if use_seed else None
@@ -219,7 +222,8 @@ def sidebar() -> RunConfig | None:
     return RunConfig(
         topic=topic.strip(), tags=tags, require_all=require_all,
         ideas_to_evaluate=ideas, provider=provider, model=model or None,
-        judges=judges, seed=(int(seed) if seed is not None else None),
+        judges=judges, rounds=rounds, closing=closing,
+        seed=(int(seed) if seed is not None else None),
         neutralize=neutralize, concurrency=concurrency, dedupe=dedupe,
         cache=cache, rag=rag, rag_k=rag_k, weights=weights,
     )
