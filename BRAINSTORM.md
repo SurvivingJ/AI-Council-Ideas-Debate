@@ -1,0 +1,144 @@
+# AI Council — Improvement Brainstorm & Roadmap
+
+An analysis of the current codebase and a prioritised set of ideas for improving
+the application, covering backend logic/prompts, model access, personas, data
+output and UI. Items marked **[done]** were implemented in this change; the rest
+are proposals.
+
+---
+
+## 1. Where the app stands today
+
+The original `openaicouncil.py` is a single-file CLI that:
+
+1. Loads economist "simulacra" from `CouncilMembers/*/` (each with
+   `instructions.txt`, `info.txt` tags, and optional knowledge `Files/`).
+2. Spins up an OpenAI **Assistant + thread** per member per side (for/against).
+3. Has each member generate an idea, then argue for, against, and rebut.
+4. A **Judge** assistant comments on each argument, and the comment is run
+   through **VADER sentiment analysis** — positive text → +1, negative → −1.
+5. Sums those ±1 signals to rank ideas and writes the winner to `best_option.txt`.
+
+### Key problems identified
+
+| # | Problem | Impact |
+|---|---------|--------|
+| 1 | Built on the **deprecated OpenAI Assistants API** (`beta.threads`, `beta.assistants`, `file_ids`). | The app is on a path to breaking entirely as OpenAI sunsets the beta. |
+| 2 | **Sentiment ≠ quality.** VADER measures emotional tone of the judge's prose, not the logical merit of an argument. A judge saying "this is a *terrible*, *dangerous* fallacy" can score *positive* on words like "strong". | Scores are noisy and only loosely tied to argument quality. |
+| 3 | **Single provider (OpenAI only)**, model hard-coded to `gpt-3.5-turbo` in `__main__`. | No access to cheaper/better models; locked to one vendor. |
+| 4 | Uses a **module-global `council`** object inside methods (`council.client...`). | Fragile; breaks if more than one council exists; hidden coupling. |
+| 5 | **Output is scattered** across `logs.txt`, `logs.csv`, `scoring.txt`, `sentiment.txt`, `ideas.txt`, `results.txt`, `best_option.txt`, all *appended* forever. | Hard to consume; results from different runs bleed together. |
+| 6 | **Blocking `input()` prompts and CLI-only.** No arguments, no GUI. | Not scriptable; not shareable; poor UX. |
+| 7 | **All 19 members are economists**; the framework is general but the roster isn't. | Limited range of perspectives. |
+| 8 | Personas are short, hand-written one-liners of varying depth. | Members can sound generic and interchangeable. |
+| 9 | Idea selection uses `random` without a seed; only 3 of N ideas evaluated. | Non-reproducible; most generated ideas are discarded unjudged. |
+| 10 | No `requirements.txt`, no tests, secret read from an unusual env var name. | Hard to set up and trust. |
+
+---
+
+## 2. Implemented in this change
+
+- **[done] OpenRouter support + provider abstraction** (`llm.py`). A single
+  `LLMClient` speaks the OpenAI-compatible Chat Completions API, so the Council
+  now runs against **OpenRouter** (hundreds of models, one key) *or* OpenAI.
+  This also sidesteps the deprecated Assistants API entirely.
+- **[done] Rubric-based judging** (`council.py`, `Judge`). The judge now returns
+  structured JSON `{"score": 1-10, "reasoning": "..."}` on logic/evidence/rigour,
+  replacing the VADER sentiment proxy. Robust parsing with a regex + neutral
+  fallback so one malformed reply can't crash a run.
+- **[done] 8 new members**, broadening beyond pure economics into innovation,
+  finance-fragility, governance, management and development:
+  Schumpeter, Ostrom, Minsky, Galbraith, Sowell, Drucker, Christensen,
+  Ha-Joon Chang. Roster grows 19 → 27.
+- **[done] Interview-driven persona builder** (`interview.py`). Generates probing
+  questions, role-plays the figure's answers, and distils a rich
+  `instructions.txt` + suggested tags — producing far more distinctive personas
+  than a one-line prompt.
+- **[done] Clean, scriptable CLI** with `--topic/--provider/--model/--tags/--ideas`
+  and **structured JSON output** (`results.json`) containing every idea, the full
+  debate transcript, per-argument scores and the winner.
+- **[done] `requirements.txt`** and expanded `master_tags.txt`.
+
+---
+
+## 3. Backend logic & prompt improvements (proposals)
+
+- **Multi-judge panels + score aggregation.** Use 3–5 judges with different
+  temperaments (a sceptic, an optimist, a domain expert) and average/median their
+  rubric scores to reduce single-judge variance. The `Judge` class already
+  supports this — just instantiate several.
+- **Multi-dimensional rubric.** Score each argument on separate axes (novelty,
+  feasibility, evidence, internal logic, risk) rather than one number, and let the
+  user weight them. Store the vector in the JSON.
+- **Score the *idea*, not just the arguments.** Currently "best" = idea that
+  sustains the most total argument quality. Add a direct judged verdict of the
+  idea after the debate ("given both sides, rate this idea 1–10").
+- **Structured debate rounds.** Opening → cross-examination → closing, with a
+  configurable number of rounds, instead of a single arg+rebut exchange.
+- **De-duplication / clustering of ideas.** Embed generated ideas and cluster to
+  drop near-duplicates before the (expensive) debate phase, so the debate budget
+  is spent on genuinely distinct ideas.
+- **Retrieval / RAG for knowledge files.** The old app fed each member's `Files/`
+  (Buffett's shareholder letters, Keynes' *General Theory*, etc.) via Assistants
+  retrieval. Re-add this with a vendor-neutral RAG step (embed the PDFs, retrieve
+  top-k chunks, inject into the system prompt) so members cite their own corpus.
+- **Cost & token accounting.** Log tokens and estimated cost per run from the API
+  usage field; surface a per-run summary. Helps compare models on OpenRouter.
+- **Reproducibility.** Seed the RNG and record the seed, model, and full config in
+  `results.json` (config is already recorded; add the seed).
+- **Async / concurrent calls.** Members debate independently — fan the calls out
+  with `asyncio`/threads to cut wall-clock time dramatically.
+- **Caching.** Cache identical (system, prompt, model) calls to avoid paying twice
+  during development and re-runs.
+
+## 4. Persona & "interview" improvements
+
+- **Interview depth knobs.** Follow-up questions that dig into the *weakest* prior
+  answer; adversarial questions that force the persona to defend against critics.
+- **Self-consistency check.** After building a persona, run a few sanity
+  questions and have a judge rate how well answers match the known figure.
+- **Persona knowledge cards.** Alongside `instructions.txt`, generate a short list
+  of the figure's signature concepts, canonical quotes and rivals, injected as
+  few-shot flavour.
+- **Broaden the roster** beyond economics: scientists, technologists, ethicists,
+  historians, so the Council can tackle non-economic topics well.
+
+## 5. Data output & evaluation
+
+- **Single JSON per run** (done) + optional Markdown report renderer
+  (`results.json` → a readable debate write-up).
+- **Run manifest / history folder.** Write each run to `runs/<timestamp>/` instead
+  of appending to shared files forever.
+- **Leaderboard across runs.** Track which members' ideas win most often and which
+  judges are harshest/most lenient.
+
+## 6. UI improvements
+
+- **Web UI (recommended next step).** A small **Streamlit** or **FastAPI + React**
+  front end: enter a topic, pick provider/model and tags, watch ideas and the
+  debate stream in live, and browse the scored transcript. `results.json` is
+  already shaped to drive this directly.
+- **Streaming output** so the user sees arguments as they generate rather than
+  waiting for the whole run.
+- **Interactive member/tag picker** (checkbox list from `master_tags.txt`) instead
+  of numeric console prompts.
+- **Shareable result pages** and export to PDF/Markdown.
+- **"Add a member" flow** that calls `interview.py` from the UI and previews the
+  generated persona before saving.
+
+## 7. Engineering hygiene
+
+- Add `pytest` unit tests for persona loading, tag filtering and judge parsing
+  (pure functions, no network needed — see the smoke tests used during this
+  change).
+- Add a `.env.example`, type hints throughout (mostly done in the new modules),
+  and a `pyproject.toml`.
+- CI to lint and run the offline tests.
+
+---
+
+## Suggested next milestone
+
+1. Multi-judge panel + multi-axis rubric (biggest quality win, small code change).
+2. Async fan-out + token/cost logging (biggest speed/cost win).
+3. Streamlit UI over `results.json` (biggest UX win).

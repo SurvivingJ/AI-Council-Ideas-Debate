@@ -1,1 +1,1 @@
-finance,economics,psychology,test
+economics,finance,psychology,politics,marxism,innovation,governance,management,development,test
