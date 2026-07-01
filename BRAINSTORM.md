@@ -85,11 +85,13 @@ The original `openaicouncil.py` is a single-file CLI that:
   Theorist, Generalist) each score every argument and idea; the aggregate is the
   **median**, robust to a single outlier judge. Size set via `--judges`
   (default 3); per-judge votes are stored in the transcript.
-- **[done] Direct post-debate idea verdict.** Ideas are now ranked by a judged
-  verdict on the idea's *own merit* (soundness/feasibility/value, informed by the
-  strongest points each side made) rather than by total argument volume — which
-  previously rewarded the most *contentious* idea, not the best one. Total
-  argument quality is kept only as a tie-breaker.
+- **[done] Direct post-debate idea verdict, multi-axis.** Ideas are ranked by a
+  judged verdict on the idea's *own merit* rather than by total argument volume
+  (which previously rewarded the most *contentious* idea, not the best one). The
+  verdict is a weighted **multi-axis rubric** — novelty, feasibility, evidence,
+  logic, risk — median-aggregated per axis across the panel; users re-weight axes
+  via `--weights`, and the per-axis vector is stored. Total argument quality is
+  kept only as a tie-breaker.
 - **[done] Reproducibility.** A `--seed` seeds the RNG and is forwarded to the API
   (`seed` param) for best-effort determinism, and is recorded in `results.json`
   alongside model, temperature, members and judges.
@@ -118,9 +120,12 @@ The original `openaicouncil.py` is a single-file CLI that:
   distinct temperaments (Sceptic, Pragmatist, Empiricist, Theorist, Generalist)
   median-aggregates each rubric score; `--judges` sets the size, per-judge votes
   are stored.
-- **Multi-dimensional rubric.** Score each argument on separate axes (novelty,
-  feasibility, evidence, internal logic, risk) rather than one number, and let the
-  user weight them. Store the vector in the JSON.
+- **[done] Multi-dimensional rubric.** The idea verdict is scored on five axes
+  (novelty, feasibility, evidence, logic, risk), median-aggregated per axis
+  across the panel and combined into a weighted overall verdict; users re-weight
+  axes with `--weights` (e.g. `novelty=2,feasibility=1.5`), and the per-axis
+  vector is stored in `results.json`. (Argument scoring stays a single quality
+  number — it is only the debate-substance tie-breaker.)
 - **[done] Score the *idea*, not just the arguments.** Ideas are ranked by a direct
   post-debate verdict on the idea's own merit (informed by the strongest points
   each side made); total argument quality is now only a tie-breaker.
@@ -199,9 +204,9 @@ The original `openaicouncil.py` is a single-file CLI that:
 
 The result-quality bundle (multi-judge panel, direct idea verdict, seed), the
 full Tier 2 practicality bundle (concurrency, de-dup, caching, cost accounting),
-and RAG over member corpora are **done**. Remaining high-value work, in order:
+RAG over member corpora, and the weighted multi-axis rubric are **done**.
+Remaining high-value work, in order:
 
-1. Multi-dimensional rubric (novelty/feasibility/evidence/logic/risk), weighted.
-2. Streamlit/web UI over `results.json` (biggest UX win).
-3. Structured multi-round debate + persona knowledge cards.
-4. Add real primary texts for the curated members (drop into their `Files/`).
+1. Streamlit/web UI over `results.json` (biggest UX win).
+2. Structured multi-round debate + persona knowledge cards.
+3. Add real primary texts for the curated members (drop into their `Files/`).

@@ -24,6 +24,9 @@ python council.py --topic "..." --model anthropic/claude-3.5-sonnet --tags econo
 # Bigger judging panel + reproducible run
 python council.py --topic "..." --judges 5 --seed 42
 
+# Re-weight the idea rubric (axes: novelty, feasibility, evidence, logic, risk)
+python council.py --topic "..." --weights "novelty=2,feasibility=1.5"
+
 # Debate the topic exactly as written (skip the debiasing rewrite)
 python council.py --topic "..." --no-neutralize
 
@@ -38,10 +41,11 @@ python council.py --topic "..." --provider openai --model gpt-4o
 ```
 
 Results are written to `results.json`: every idea, the full debate transcript
-with **per-judge votes**, each idea's **direct verdict score** (1–10 on its own
-merit, which is what the winner is ranked on), the run's seed/model/judges for
-reproducibility, **de-duplication** info, and a **usage** summary (requests,
-cache hits, tokens, estimated USD cost).
+with **per-judge votes**, each idea's **direct verdict** — scored on a weighted
+**multi-axis rubric** (novelty, feasibility, evidence, logic, risk; the weighted
+overall is what the winner is ranked on, and the per-axis vector is stored) — the
+run's seed/model/judges for reproducibility, **de-duplication** info, and a
+**usage** summary (requests, cache hits, tokens, estimated USD cost).
 
 Debate/scoring calls that are independent run **concurrently** (threads), so a
 large council is far faster; generated ideas are **de-duplicated** (via

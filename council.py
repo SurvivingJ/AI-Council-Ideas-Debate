@@ -254,18 +254,45 @@ JUDGE_TEMPERAMENTS: list[tuple[str, str]] = [
     ),
 ]
 
-_JSON_RUBRIC = (
+_NATIVE_NOTE = (
     "\n\nArguments and ideas may include original-language key terms (glossed "
     "in English) from thinkers who worked in other languages; judge the "
     "substance and do not reward or penalise them for it."
-    "\n\nYou MUST reply with a JSON object of the form "
-    '{"score": <integer 1-10>, "reasoning": "<one or two sentences>"} and '
-    "nothing else."
+    "\n\nAlways reply with a single JSON object and nothing else."
 )
 
 
+# --------------------------------------------------------------------------- #
+# Multi-dimensional rubric for judging an idea's own merit. Each axis is scored
+# 1-10 (higher is better) and combined into a weighted overall verdict; users
+# can re-weight the axes (e.g. --weights novelty=2,feasibility=1.5).
+# --------------------------------------------------------------------------- #
+@dataclass
+class Axis:
+    name: str
+    description: str
+    weight: float = 1.0
+
+
+DEFAULT_IDEA_RUBRIC: list[Axis] = [
+    Axis("novelty", "originality and non-obviousness of the idea"),
+    Axis("feasibility", "how practically implementable it is with real resources"),
+    Axis("evidence", "how well supported by evidence, data, precedent or theory"),
+    Axis("logic", "internal coherence and soundness once scrutinised"),
+    Axis("risk", "downside safety: 10 = robust with limited downside, 1 = fragile or dangerous"),
+]
+
+
+def build_rubric(weights: dict[str, float] | None) -> list[Axis]:
+    """Copy the default rubric, overriding weights for named axes."""
+    weights = weights or {}
+    return [Axis(a.name, a.description, float(weights.get(a.name, a.weight)))
+            for a in DEFAULT_IDEA_RUBRIC]
+
+
 class Judge:
-    """A single judge with a temperament; scores arguments and ideas 1-10."""
+    """A single judge with a temperament. Scores arguments with one number and
+    ideas across a multi-axis rubric."""
 
     def __init__(
         self,
@@ -279,9 +306,9 @@ class Judge:
         self.instructions = instructions
         if temperament:
             self.instructions += "\n\n" + temperament
-        self.instructions += _JSON_RUBRIC
+        self.instructions += _NATIVE_NOTE
 
-    def _judge(self, user_prompt: str) -> tuple[float, str]:
+    def _judge(self, user_prompt: str) -> dict:
         raw = self.client.chat(
             [
                 {"role": "system", "content": self.instructions},
@@ -290,46 +317,56 @@ class Judge:
             temperature=0.2,
             response_format={"type": "json_object"},
         )
-        return self._parse(raw)
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else {"_raw": raw}
+        except (json.JSONDecodeError, TypeError):
+            return {"_raw": raw}
 
     def score_argument(self, topic: str, idea: str, argument: str) -> tuple[float, str]:
-        return self._judge(
+        data = self._judge(
             f"Topic: {topic}\nIdea: {idea}\n\n"
             f"Argument to judge:\n\"{argument}\"\n\n"
             "Score its logical strength, evidence and rigour, where 10 is a "
             "flawless, rigorous, well-evidenced argument and 1 is fallacious or "
-            "baseless."
+            "baseless. Reply with JSON "
+            '{"score": <integer 1-10>, "reasoning": "<one or two sentences>"}.'
         )
+        return _num(data.get("score"), data), str(data.get("reasoning", "")).strip()
 
     def score_idea(
-        self, topic: str, idea: str, for_case: str, against_case: str
-    ) -> tuple[float, str]:
-        return self._judge(
+        self, topic: str, idea: str, for_case: str, against_case: str, rubric: list[Axis]
+    ) -> tuple[dict, str]:
+        axes_desc = "\n".join(f"- {a.name}: {a.description}" for a in rubric)
+        keys = ", ".join(f'"{a.name}": <integer 1-10>' for a in rubric)
+        data = self._judge(
             f"Topic: {topic}\n\nIdea under judgement:\n\"{idea}\"\n\n"
             f"The strongest points made FOR it:\n{for_case}\n\n"
             f"The strongest points made AGAINST it:\n{against_case}\n\n"
-            "Having weighed both sides, score the IDEA ITSELF on its own merit - "
-            "its soundness, feasibility and value - where 10 is an excellent, "
-            "compelling idea that survives scrutiny and 1 is a poor or unworkable "
-            "one. Judge the idea, not the eloquence of either side."
+            "Having weighed both sides, score the IDEA ITSELF (not the eloquence "
+            "of either side) on each of these axes, 1-10 where higher is better:\n"
+            f"{axes_desc}\n\n"
+            f'Reply with JSON {{"scores": {{{keys}}}, "reasoning": "<one or two '
+            'sentences>"}.'
         )
+        raw_scores = data.get("scores") if isinstance(data.get("scores"), dict) else {}
+        scores = {a.name: _num(raw_scores.get(a.name), data) for a in rubric}
+        return scores, str(data.get("reasoning", "")).strip()
 
-    @staticmethod
-    def _parse(raw: str) -> tuple[float, str]:
-        try:
-            data = json.loads(raw)
-            return float(data["score"]), str(data.get("reasoning", "")).strip()
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-            match = _SCORE_RE.search(raw)
-            if match:
-                return float(match.group(1)), raw.strip()
-            # Neutral fallback so one malformed reply can't crash a whole run.
-            return 5.0, raw.strip()
+
+def _num(value, data: dict) -> float:
+    """Coerce a judge score to a float, falling back to a regex over the raw
+    text and finally to a neutral 5.0 so one malformed reply can't crash a run."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        match = _SCORE_RE.search(data.get("_raw", "") or json.dumps(data))
+        return float(match.group(1)) if match else 5.0
 
 
 class JudgePanel:
-    """Aggregates several judges; the aggregate score is the median (robust to
-    a single outlier judge)."""
+    """Aggregates several judges; the aggregate is the median (robust to a
+    single outlier judge)."""
 
     def __init__(self, instructions: str, client: LLMClient, n_judges: int = 3):
         n_judges = max(1, n_judges)
@@ -343,23 +380,28 @@ class JudgePanel:
     def names(self) -> list[str]:
         return [j.name for j in self.judges]
 
-    @staticmethod
-    def _aggregate(votes: list[dict]) -> float:
-        return statistics.median(v["score"] for v in votes)
-
     def score_argument(self, topic: str, idea: str, argument: str) -> dict:
         votes = []
         for j in self.judges:
             score, reasoning = j.score_argument(topic, idea, argument)
             votes.append({"judge": j.name, "score": score, "reasoning": reasoning})
-        return {"aggregate": self._aggregate(votes), "votes": votes}
+        return {"aggregate": statistics.median(v["score"] for v in votes), "votes": votes}
 
-    def score_idea(self, topic: str, idea: str, for_case: str, against_case: str) -> dict:
+    def score_idea(
+        self, topic: str, idea: str, for_case: str, against_case: str, rubric: list[Axis]
+    ) -> dict:
         votes = []
         for j in self.judges:
-            score, reasoning = j.score_idea(topic, idea, for_case, against_case)
-            votes.append({"judge": j.name, "score": score, "reasoning": reasoning})
-        return {"aggregate": self._aggregate(votes), "votes": votes}
+            scores, reasoning = j.score_idea(topic, idea, for_case, against_case, rubric)
+            votes.append({"judge": j.name, "scores": scores, "reasoning": reasoning})
+        # Median per axis across the panel, then a weighted overall verdict.
+        axes = {
+            a.name: statistics.median(v["scores"][a.name] for v in votes)
+            for a in rubric
+        }
+        total_w = sum(a.weight for a in rubric) or 1.0
+        overall = sum(axes[a.name] * a.weight for a in rubric) / total_w
+        return {"overall": round(overall, 2), "axes": axes, "votes": votes}
 
 
 # --------------------------------------------------------------------------- #
@@ -383,6 +425,7 @@ class RunConfig:
     cache: bool = True
     rag: bool = True
     rag_k: int = 4
+    weights: dict = field(default_factory=dict)
     output: str = "results.json"
 
 
@@ -433,12 +476,17 @@ class Council:
                 "Try different --tags or drop the filter."
             )
         self.panel = JudgePanel(load_judge_instructions(), self.client, run.judges)
+        self.rubric = build_rubric(run.weights)
         print(
             f"Convened {len(self.personas)} members and a "
             f"{len(self.panel.judges)}-judge panel ({', '.join(self.panel.names)}) "
             f"on '{run.provider}:{self.client.model}'"
             + (f" [seed={run.seed}]" if run.seed is not None else "")
         )
+        rubric_str = ", ".join(
+            f"{a.name}×{a.weight:g}" if a.weight != 1 else a.name for a in self.rubric
+        )
+        print(f"Idea rubric: {rubric_str}")
         print("Members: " + ", ".join(p.name for p in self.personas))
 
         # Build a retrieval index over each member's Files/ corpus, once, up
@@ -545,16 +593,18 @@ class Council:
         for_case = self._best_points(transcript, "for")
         against_case = self._best_points(transcript, "against")
         idea_verdict = self.panel.score_idea(
-            self.run.topic, idea, for_case, against_case
+            self.run.topic, idea, for_case, against_case, self.rubric
         )
+        axes_str = " ".join(f"{k}={v:.0f}" for k, v in idea_verdict["axes"].items())
         print(
             f"  for={for_total:.0f} against={against_total:.0f} "
-            f"-> idea verdict: {idea_verdict['aggregate']:.1f}/10"
+            f"-> verdict {idea_verdict['overall']:.1f}/10  [{axes_str}]"
         )
 
         return {
             "idea": idea,
-            "verdict_score": idea_verdict["aggregate"],
+            "verdict_score": idea_verdict["overall"],
+            "verdict_axes": idea_verdict["axes"],
             "verdict_votes": idea_verdict["votes"],
             "for_score": for_total,
             "against_score": against_total,
@@ -614,6 +664,7 @@ class Council:
             "temperature": self.run.temperature,
             "members": [p.name for p in self.personas],
             "judges": self.panel.names,
+            "rubric": [{"axis": a.name, "weight": a.weight} for a in self.rubric],
             "rag": {
                 "enabled": self.run.rag,
                 "k": self.run.rag_k,
@@ -637,9 +688,11 @@ class Council:
         if best:
             print(f"BEST IDEA (verdict {best['verdict_score']:.1f}/10):")
             print(best["idea"])
+            axes_str = ", ".join(f"{k} {v:.0f}" for k, v in best["verdict_axes"].items())
             print(
-                f"\n[verdict {best['verdict_score']:.1f}/10 | debate substance: "
-                f"for {best['for_score']:.0f}, against {best['against_score']:.0f}]"
+                f"\n[verdict {best['verdict_score']:.1f}/10 | {axes_str} | "
+                f"debate substance: for {best['for_score']:.0f}, "
+                f"against {best['against_score']:.0f}]"
             )
         u = result["usage"]
         cost = u["estimated_cost_usd"]
@@ -658,6 +711,27 @@ class Council:
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
+def parse_weights(spec: str) -> dict:
+    """Parse 'novelty=2,feasibility=1.5' into {'novelty': 2.0, 'feasibility': 1.5}."""
+    weights: dict[str, float] = {}
+    valid = {a.name for a in DEFAULT_IDEA_RUBRIC}
+    for part in spec.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        key, _, val = part.partition("=")
+        key = key.strip()
+        if key not in valid:
+            raise SystemExit(
+                f"Unknown rubric axis '{key}'. Valid axes: {', '.join(sorted(valid))}."
+            )
+        try:
+            weights[key] = float(val)
+        except ValueError:
+            raise SystemExit(f"Weight for '{key}' must be a number, got '{val}'.")
+    return weights
+
+
 def parse_args() -> RunConfig:
     p = argparse.ArgumentParser(description="Run the AI Council on a topic.")
     p.add_argument("--topic", help="The question/topic to generate ideas for.")
@@ -736,12 +810,19 @@ def parse_args() -> RunConfig:
         default=4,
         help="Passages retrieved from a member's corpus per prompt (default: 4).",
     )
+    p.add_argument(
+        "--weights",
+        default="",
+        help="Re-weight idea rubric axes, e.g. 'novelty=2,feasibility=1.5'. "
+        "Axes: " + ", ".join(a.name for a in DEFAULT_IDEA_RUBRIC) + ".",
+    )
     p.add_argument("--temperature", type=float, default=0.8)
     p.add_argument("--output", default="results.json")
     args = p.parse_args()
 
     topic = args.topic or input("Topic of interest: ").strip()
     return RunConfig(
+        weights=parse_weights(args.weights),
         topic=topic,
         tags=args.tags,
         require_all=args.require_all_tags,
