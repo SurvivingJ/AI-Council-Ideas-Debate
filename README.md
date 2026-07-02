@@ -127,14 +127,33 @@ Idea overlap is measured via embeddings where available, falling back to a
 lexical similarity. Note this runs the council once per wording, so cost scales
 with the number of variants — keep `--ideas`/`--judges` small for exploration.
 
+### Persona knowledge cards
+
+Each member can carry a `card.json` — a compact, always-on distillation of their
+**signature concepts, characteristic vocabulary, positions, and intellectual
+rivals** — injected into their system prompt so they argue recognisably like
+themselves (distinct from RAG, which retrieves query-relevant passages per turn).
+Iconic members ship with hand-written cards; generate the rest with `cards.py`:
+
+```bash
+python cards.py "JosephSchumpeter" --write      # one member
+python cards.py --all --write                    # every member missing a card
+```
+
+Cards contain no fabricated quotations — only real concepts and terms of art.
+Disable them for a run with `--no-cards` (or the UI toggle).
+
 ### Building richer personalities via interviews
 
 `interview.py` "interviews" a figure — generating probing questions, role-playing
-their answers, and distilling a rich persona — then writes a new council member:
+their answers, and distilling a rich persona — then writes a new council member.
+Depth knobs make the interview adversarial: `--followups` probes the *weakest*
+prior answers for something concrete, and `--adversarial` makes the persona
+defend against questions channelling their real critics:
 
 ```bash
 python interview.py "Joseph Schumpeter" --write
-python interview.py "Ada Lovelace" --seed "mathematician, computing pioneer" --write
+python interview.py "Ada Lovelace" --followups 3 --adversarial 3 --write
 ```
 
 ### Configuration

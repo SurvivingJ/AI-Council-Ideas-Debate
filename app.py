@@ -201,6 +201,7 @@ def sidebar() -> RunConfig | None:
         neutralize = st.checkbox("Neutralise topic", value=True)
         dedupe = st.checkbox("De-duplicate ideas", value=True)
         rag = st.checkbox("Retrieval (RAG)", value=True)
+        cards = st.checkbox("Knowledge cards", value=True)
         cache = st.checkbox("Use response cache", value=True)
 
     run = st.sidebar.button("▶ Run council", type="primary", use_container_width=True)
@@ -225,7 +226,7 @@ def sidebar() -> RunConfig | None:
         judges=judges, rounds=rounds, closing=closing,
         seed=(int(seed) if seed is not None else None),
         neutralize=neutralize, concurrency=concurrency, dedupe=dedupe,
-        cache=cache, rag=rag, rag_k=rag_k, weights=weights,
+        cache=cache, rag=rag, rag_k=rag_k, cards=cards, weights=weights,
     )
 
 

@@ -125,6 +125,51 @@ def load_judge_instructions() -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Persona knowledge cards
+# --------------------------------------------------------------------------- #
+# A compact, always-on "stay recognisably yourself" block (signature concepts,
+# vocabulary, characteristic stances, intellectual rivals) injected into a
+# member's system prompt. Distinct from RAG, which retrieves query-relevant
+# passages per turn; the card is persistent flavour. Stored as card.json in the
+# member folder (not under Files/, so it is not part of the RAG corpus). Generate
+# them with cards.py.
+_CARD_FIELDS = [
+    ("signature_concepts", "Concepts you are known for"),
+    ("key_terms", "Vocabulary you naturally use"),
+    ("stances", "Positions you characteristically hold"),
+    ("rivals", "Ideas or thinkers you push against"),
+]
+
+
+def load_card(name: str) -> dict | None:
+    path = os.path.join(MEMBERS_DIR, name, "card.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def format_card(card: dict | None) -> str:
+    if not card:
+        return ""
+    lines = []
+    for key, label in _CARD_FIELDS:
+        vals = [str(v).strip() for v in (card.get(key) or []) if str(v).strip()]
+        if vals:
+            lines.append(f"- {label}: " + "; ".join(vals))
+    if not lines:
+        return ""
+    return (
+        "\n\nKnowledge card — stay recognisably yourself, drawing naturally on "
+        "these (don't just list them):\n" + "\n".join(lines)
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Debating members
 # --------------------------------------------------------------------------- #
 # Many council members thought and wrote in languages other than English
@@ -154,13 +199,13 @@ class Member:
     """
 
     def __init__(self, persona: Persona, side: Side, client: LLMClient,
-                 retriever=None, rag_k: int = 4):
+                 retriever=None, rag_k: int = 4, card_text: str = ""):
         self.persona = persona
         self.side = side
         self.client = client
         self.retriever = retriever
         self.rag_k = rag_k
-        system_prompt = persona.instructions + CODE_SWITCH_DIRECTIVE
+        system_prompt = persona.instructions + CODE_SWITCH_DIRECTIVE + card_text
         self.history: list[dict] = [{"role": "system", "content": system_prompt}]
 
     def _augment(self, prompt: str, query: str) -> str:
@@ -443,6 +488,7 @@ class RunConfig:
     cache: bool = True
     rag: bool = True
     rag_k: int = 4
+    cards: bool = True
     weights: dict = field(default_factory=dict)
     output: str = "results.json"
 
@@ -501,6 +547,16 @@ class Council:
             )
         self.panel = JudgePanel(load_judge_instructions(), self.client, run.judges)
         self.rubric = build_rubric(run.weights)
+
+        # Load persona knowledge cards (compact always-on flavour), if present.
+        self._cards: dict[str, str] = {}
+        if run.cards:
+            for p in self.personas:
+                txt = format_card(load_card(p.name))
+                if txt:
+                    self._cards[p.name] = txt
+            if self._cards:
+                print(f"Knowledge cards: applied to {len(self._cards)} members")
         print(
             f"Convened {len(self.personas)} members and a "
             f"{len(self.panel.judges)}-judge panel ({', '.join(self.panel.names)}) "
@@ -548,6 +604,7 @@ class Council:
             self.client,
             retriever=self.retrievers.get(persona.name),
             rag_k=self.run.rag_k,
+            card_text=self._cards.get(persona.name, ""),
         )
 
     # -- idea generation --------------------------------------------------- #
@@ -733,6 +790,7 @@ class Council:
             "members": [p.name for p in self.personas],
             "judges": self.panel.names,
             "debate": {"rounds": self.run.rounds, "closing": self.run.closing},
+            "cards_used": sorted(self._cards),
             "rubric": [{"axis": a.name, "weight": a.weight} for a in self.rubric],
             "rag": {
                 "enabled": self.run.rag,
@@ -892,6 +950,12 @@ def parse_args() -> RunConfig:
         help="Passages retrieved from a member's corpus per prompt (default: 4).",
     )
     p.add_argument(
+        "--no-cards",
+        dest="cards",
+        action="store_false",
+        help="Skip persona knowledge cards (card.json).",
+    )
+    p.add_argument(
         "--weights",
         default="",
         help="Re-weight idea rubric axes, e.g. 'novelty=2,feasibility=1.5'. "
@@ -922,6 +986,7 @@ def parse_args() -> RunConfig:
         cache=args.cache,
         rag=args.rag,
         rag_k=args.rag_k,
+        cards=args.cards,
         output=args.output,
     )
 

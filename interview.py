@@ -10,11 +10,18 @@ The result is a persona grounded in specific commitments and turns of phrase,
 which produces noticeably more distinctive debate behaviour than a one-line
 "You are X" prompt.
 
+The interview has depth knobs beyond the base questions:
+  * ``--followups N`` — after the base round, an interviewer picks the *weakest,
+    vaguest* prior answer and probes it for something concrete.
+  * ``--adversarial N`` — questions channelling the figure's real critics/rivals
+    that the persona must defend against.
+These deepen the transcript before it is distilled, yielding a sharper persona.
+
 Usage
 -----
     python interview.py "Joseph Schumpeter"
     python interview.py "Elinor Ostrom" --seed "Nobel economist, commons governance"
-    python interview.py "Ada Lovelace" --questions 8 --provider openai
+    python interview.py "Ada Lovelace" --questions 8 --followups 3 --adversarial 3
 
 Add ``--write`` to save the generated files into CouncilMembers/<Name>/.
 Without it the interview and drafts are printed and saved to a scratch file.
@@ -66,32 +73,97 @@ def generate_questions(client: LLMClient, name: str, seed: str, n: int) -> list[
         return [q.strip("-* ") for q in raw.splitlines() if q.strip()][:n]
 
 
-def interview(client: LLMClient, name: str, seed: str, questions: list[str]) -> list[dict]:
+def persona_history(name: str, seed: str) -> list[dict]:
     seed_line = f" ({seed})" if seed else ""
-    history = [
-        {
-            "role": "system",
-            "content": (
-                f"You ARE {name}{seed_line}. Answer every question in the first "
-                "person, in your authentic voice, drawing on your real ideas, "
-                "writings and worldview. Be specific and vivid; use the "
-                "vocabulary and rhetorical habits you are known for. 3-6 "
-                "sentences per answer."
-            ),
-        }
-    ]
-    transcript = []
-    for i, q in enumerate(questions, 1):
-        history.append({"role": "user", "content": q})
-        answer = client.chat(history, temperature=0.85)
-        history.append({"role": "assistant", "content": answer})
-        transcript.append({"q": q, "a": answer})
-        print(f"\nQ{i}. {q}\n> {answer}")
+    return [{
+        "role": "system",
+        "content": (
+            f"You ARE {name}{seed_line}. Answer every question in the first "
+            "person, in your authentic voice, drawing on your real ideas, "
+            "writings and worldview. Be specific and vivid; use the vocabulary "
+            "and rhetorical habits you are known for. 3-6 sentences per answer."
+        ),
+    }]
+
+
+def ask_persona(client: LLMClient, history: list[dict], question: str,
+                transcript: list[dict], kind: str) -> str:
+    """Ask the in-character persona a question, keeping conversation memory."""
+    history.append({"role": "user", "content": question})
+    answer = client.chat(history, temperature=0.85)
+    history.append({"role": "assistant", "content": answer})
+    transcript.append({"q": question, "a": answer, "kind": kind})
+    tag = "" if kind == "base" else f" [{kind}]"
+    print(f"\nQ{tag}. {question}\n> {answer}")
+    return answer
+
+
+def _convo(transcript: list[dict]) -> str:
+    return "\n\n".join(f"Q: {t['q']}\nA: {t['a']}" for t in transcript)
+
+
+def weakest_followup(client: LLMClient, name: str, transcript: list[dict]) -> str:
+    """Interviewer picks the weakest prior answer and probes it."""
+    raw = client.chat(
+        [
+            {"role": "system", "content": (
+                "You are a sharp interviewer who probes weak, vague or evasive "
+                "answers until they become concrete.")},
+            {"role": "user", "content": (
+                f"Interview with {name} so far:\n\n{_convo(transcript)}\n\n"
+                "Identify the SINGLE weakest, vaguest or least substantive answer, "
+                "and write ONE incisive follow-up question that forces a concrete, "
+                'specific response. Return JSON {"followup": "..."}.')},
+        ],
+        temperature=0.6, response_format={"type": "json_object"},
+    )
+    try:
+        return json.loads(raw)["followup"].strip()
+    except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
+        return "Can you be far more concrete and specific about your weakest answer above?"
+
+
+def adversarial_question(client: LLMClient, name: str, transcript: list[dict]) -> str:
+    """Generate a tough objection a real critic/rival would press."""
+    raw = client.chat(
+        [
+            {"role": "system", "content": (
+                "You channel a thinker's toughest, best-informed critics and rivals.")},
+            {"role": "user", "content": (
+                f"Given {name}'s positions so far:\n\n{_convo(transcript)}\n\n"
+                "Pose ONE tough, adversarial question that a leading critic or rival "
+                "of theirs would press — a real objection they must defend against, "
+                'not a softball. Return JSON {"question": "..."}.')},
+        ],
+        temperature=0.8, response_format={"type": "json_object"},
+    )
+    try:
+        return json.loads(raw)["question"].strip()
+    except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
+        return f"What is the strongest objection to your view, and how do you answer it?"
+
+
+def run_interview(client: LLMClient, name: str, seed: str, questions: list[str],
+                  followups: int = 0, adversarial: int = 0) -> list[dict]:
+    """Full interview: base questions, then weakest-answer follow-ups, then
+    adversarial defences — all in one continuous in-character conversation."""
+    history = persona_history(name, seed)
+    transcript: list[dict] = []
+    for q in questions:
+        ask_persona(client, history, q, transcript, "base")
+    for _ in range(max(0, followups)):
+        ask_persona(client, history, weakest_followup(client, name, transcript),
+                    transcript, "follow-up")
+    for _ in range(max(0, adversarial)):
+        ask_persona(client, history, adversarial_question(client, name, transcript),
+                    transcript, "adversarial")
     return transcript
 
 
 def synthesize_persona(client: LLMClient, name: str, transcript: list[dict]) -> dict:
-    convo = "\n\n".join(f"Q: {t['q']}\nA: {t['a']}" for t in transcript)
+    convo = "\n\n".join(
+        f"Q ({t.get('kind', 'base')}): {t['q']}\nA: {t['a']}" for t in transcript
+    )
     messages = [
         {
             "role": "system",
@@ -142,7 +214,11 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Interview a figure to build a council persona.")
     ap.add_argument("name", help="Display name of the figure, e.g. 'Joseph Schumpeter'.")
     ap.add_argument("--seed", default="", help="Optional one-line context/description.")
-    ap.add_argument("--questions", type=int, default=6, help="Number of interview questions.")
+    ap.add_argument("--questions", type=int, default=6, help="Number of base questions.")
+    ap.add_argument("--followups", type=int, default=2,
+                    help="Follow-up questions probing the weakest prior answers.")
+    ap.add_argument("--adversarial", type=int, default=2,
+                    help="Adversarial questions the figure must defend against.")
     ap.add_argument("--provider", default="openrouter", choices=["openrouter", "openai"])
     ap.add_argument("--model", default=None)
     ap.add_argument(
@@ -156,7 +232,8 @@ def main() -> None:
     print(f"Interviewing {args.name} via {args.provider}:{client.model}\n")
 
     questions = generate_questions(client, args.name, args.seed, args.questions)
-    transcript = interview(client, args.name, args.seed, questions)
+    transcript = run_interview(client, args.name, args.seed, questions,
+                               followups=args.followups, adversarial=args.adversarial)
     persona = synthesize_persona(client, args.name, transcript)
 
     print("\n" + "=" * 60)

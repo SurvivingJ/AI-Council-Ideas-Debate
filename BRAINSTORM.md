@@ -157,13 +157,19 @@ The original `openaicouncil.py` is a single-file CLI that:
 
 ## 4. Persona & "interview" improvements
 
-- **Interview depth knobs.** Follow-up questions that dig into the *weakest* prior
-  answer; adversarial questions that force the persona to defend against critics.
+- **[done] Interview depth knobs** (`interview.py`). `--followups` makes an
+  interviewer pick the *weakest/vaguest* prior answer and probe it for something
+  concrete; `--adversarial` poses objections channelling the figure's real
+  critics that the persona must defend against — all in one continuous
+  in-character conversation, deepening the transcript before synthesis.
 - **Self-consistency check.** After building a persona, run a few sanity
   questions and have a judge rate how well answers match the known figure.
-- **Persona knowledge cards.** Alongside `instructions.txt`, generate a short list
-  of the figure's signature concepts, canonical quotes and rivals, injected as
-  few-shot flavour.
+- **[done] Persona knowledge cards** (`cards.py`, `council.load_card`). Each member
+  can carry a `card.json` (signature concepts, characteristic vocabulary,
+  stances, intellectual rivals — no fabricated quotes) injected as compact
+  always-on flavour into their system prompt, distinct from RAG's per-turn
+  retrieval. Iconic members ship with hand-written cards; `cards.py` generates
+  the rest via the LLM. `--no-cards` / UI toggle disables.
 - **[done] Broaden the roster** beyond economics: historians, scientists and
   technologists are now included, so the Council can tackle non-economic topics.
   Further breadth (ethicists, artists, legal thinkers, non-Western political
@@ -216,10 +222,11 @@ full Tier 2 practicality bundle (concurrency, de-dup, caching, cost accounting),
 RAG over member corpora, the weighted multi-axis rubric, and the Streamlit web
 UI are **done**. Remaining high-value work, in order:
 
-1. Persona knowledge cards + interview depth knobs.
-2. A sensitivity-analysis view in the UI (there is already a `sensitivity.json`).
-3. Token-level streaming of argument text in the UI.
-4. Add real primary texts for the curated members (drop into their `Files/`).
+1. A sensitivity-analysis view in the UI (there is already a `sensitivity.json`).
+2. Token-level streaming of argument text in the UI.
+3. Generate `card.json` for the rest of the roster (run `cards.py --all`) and
+   add real primary texts for the curated members (drop into their `Files/`).
+4. Self-consistency check for generated personas.
 
 **[done] Live streaming progress in the UI** — `Council` accepts a `progress_cb`
 that emits fraction+message events at each phase (index → gather → dedupe →
