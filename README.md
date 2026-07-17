@@ -1,6 +1,184 @@
 # AI Council - Idea Generation & Evaluation
 A system of LLM based bots to generate ideas and subsequently evaluate their logic, rationality and cohesiveness, and determine the best idea.
 
+---
+
+## Web UI
+
+A [Streamlit](https://streamlit.io) front end wraps the whole pipeline:
+
+```bash
+pip install -r requirements.txt
+export OPENROUTER_API_KEY=sk-or-...
+streamlit run app.py
+```
+
+Configure a run in the sidebar — topic, provider/model, roster tag filters (with
+a live member count), number of ideas and judges, seed, concurrency, RAG, and
+**rubric-axis weight sliders** — then press **▶ Run council**. A **live progress
+panel** streams each phase as it happens (indexing corpora, gathering ideas,
+de-duplicating, debating member-by-member, scoring, verdicts). When it finishes,
+the main panel shows the neutralised topic and detected framing issues, the best
+idea with its multi-axis rubric breakdown, an idea-verdict comparison, the full
+debate transcript, de-duplication and retrieval details, and a usage/cost
+summary. You can also upload a previous `results.json` to browse it without
+re-running, and download results back out.
+
+The sidebar's **Wording-sensitivity analysis** toggle runs the council across a
+neutral baseline plus paraphrases and reframes (one full run per wording) and
+renders the robustness/framing labels, a per-wording verdict chart and
+comparison table — or upload a previous `sensitivity.json` to browse it.
+
+## Quickstart (new `council.py`)
+
+The modern entry point is `council.py`. It talks to the **OpenAI-compatible Chat
+Completions API**, so it works with **[OpenRouter](https://openrouter.ai)** (hundreds
+of models behind one key) or OpenAI directly. It replaces the deprecated OpenAI
+Assistants API the original `openaicouncil.py` was built on, and swaps the old
+VADER-sentiment scoring for structured 1–10 rubric judging.
+
+```bash
+pip install -r requirements.txt
+
+# OpenRouter (default)
+export OPENROUTER_API_KEY=sk-or-...
+python council.py --topic "How to boost local civic participation"
+
+# Pick a specific model / filter the roster by expertise
+python council.py --topic "..." --model anthropic/claude-3.5-sonnet --tags economics innovation --ideas 5
+
+# Bigger judging panel + reproducible run
+python council.py --topic "..." --judges 5 --seed 42
+
+# Re-weight the idea rubric (axes: novelty, feasibility, evidence, logic, risk)
+python council.py --topic "..." --weights "novelty=2,feasibility=1.5"
+
+# Longer structured debate: opening -> N cross-examination rounds -> closing
+python council.py --topic "..." --rounds 3          # or --no-closing to skip closings
+
+# Debate the topic exactly as written (skip the debiasing rewrite)
+python council.py --topic "..." --no-neutralize
+
+# Performance/cost knobs: parallelism, de-dup, and the on-disk cache
+python council.py --topic "..." --concurrency 16       # more parallel calls
+python council.py --topic "..." --no-dedupe             # debate every idea
+python council.py --topic "..." --no-cache              # ignore cached responses
+
+# Or use OpenAI
+export OPENAI_API_KEY=sk-...
+python council.py --topic "..." --provider openai --model gpt-4o
+```
+
+Results are written to `results.json`: every idea, the full debate transcript
+with **per-judge votes**, each idea's **direct verdict** — scored on a weighted
+**multi-axis rubric** (novelty, feasibility, evidence, logic, risk; the weighted
+overall is what the winner is ranked on, and the per-axis vector is stored) — the
+run's seed/model/judges for reproducibility, **de-duplication** info, and a
+**usage** summary (requests, cache hits, tokens, estimated USD cost).
+
+Debate/scoring calls that are independent run **concurrently** (threads), so a
+large council is far faster; generated ideas are **de-duplicated** (via
+embeddings, lexical fallback) so the debate budget goes to distinct ideas; and
+identical requests are served from an on-disk **cache** so re-runs and
+development don't pay twice. Token usage and an estimated cost are printed and
+recorded (extend/override the pricing table with a `LLM_PRICING_JSON` env var).
+
+### Retrieval-augmented members (RAG over their own corpora)
+
+Each member folder can hold a `Files/` corpus (`.txt`/`.md`/`.pdf`). Before a
+run, `rag.py` reads, chunks and embeds each member's files (embeddings cached on
+disk), and during the debate it retrieves the passages most relevant to the
+question and injects them into that member's prompt — so, e.g., Keynes argues
+from *The General Theory* and Ostrom from her design principles. Members without
+a corpus simply skip retrieval; PDF text is extracted with `pdfminer.six`.
+
+```bash
+python council.py --topic "..." --rag-k 6     # retrieve 6 passages per prompt
+python council.py --topic "..." --no-rag      # disable retrieval
+```
+
+Sourcing note: the original members ship with **primary texts** (Smith's *Wealth
+of Nations*, Marx's *Capital*, Buffett's letters, …). The members added later
+(the history/science/technology figures and newer economists) instead have
+**curated reference notes** (`key_ideas.md`) — accurate digests of their major
+works, since their primary texts are under copyright or unavailable offline. See
+[`CouncilMembers/CORPUS.md`](CouncilMembers/CORPUS.md) for the full breakdown and
+how to drop in real texts.
+
+### Topic neutralisation & wording-sensitivity analysis
+
+The topic seeds the entire run, and question wording carries huge, often
+invisible influence (loaded terms, presuppositions, gain/loss framing). Two
+tools address this:
+
+- **Neutralisation** runs automatically before every council session: the topic
+  is rewritten as a neutral, open question (with detected issues recorded in
+  `results.json`), verified for neutrality, and used for the debate. Opt out with
+  `--no-neutralize`.
+- **`sensitivity.py`** runs the council across several wordings — a neutral
+  baseline, meaning-preserving **paraphrases**, and deliberately re-slanted
+  **reframes** — with the seed held fixed, then reports two things:
+  - **Lexical robustness** (baseline vs paraphrases): the answer *should* be
+    stable; if it moves, the result is noisy.
+  - **Framing sensitivity** (baseline vs reframes): if the answer moves, the
+    recommendation is an artifact of how the question was framed — a finding.
+
+```bash
+python sensitivity.py --topic "How do we stop kids wasting time online?" \
+    --paraphrases 2 --reframes 2 --ideas 2
+```
+
+Idea overlap is measured via embeddings where available, falling back to a
+lexical similarity. Note this runs the council once per wording, so cost scales
+with the number of variants — keep `--ideas`/`--judges` small for exploration.
+
+### Persona knowledge cards
+
+Each member can carry a `card.json` — a compact, always-on distillation of their
+**signature concepts, characteristic vocabulary, positions, and intellectual
+rivals** — injected into their system prompt so they argue recognisably like
+themselves (distinct from RAG, which retrieves query-relevant passages per turn).
+**All members ship with a card**; regenerate or add more with `cards.py`:
+
+```bash
+python cards.py "JosephSchumpeter" --write --overwrite   # one member
+python cards.py --all --write                             # any member missing a card
+```
+
+Cards contain no fabricated quotations — only real concepts and terms of art.
+Disable them for a run with `--no-cards` (or the UI toggle).
+
+### Building richer personalities via interviews
+
+`interview.py` "interviews" a figure — generating probing questions, role-playing
+their answers, and distilling a rich persona — then writes a new council member.
+Depth knobs make the interview adversarial: `--followups` probes the *weakest*
+prior answers for something concrete, and `--adversarial` makes the persona
+defend against questions channelling their real critics:
+
+```bash
+python interview.py "Joseph Schumpeter" --write
+python interview.py "Ada Lovelace" --followups 3 --adversarial 3 --consistency 4 --write
+```
+
+Answers **stream to the console** token-by-token, and `--consistency N` runs a
+self-check on the generated persona (factual questions answered as the brief,
+scored 0–1 by a judge for how well they match the real figure).
+
+### Configuration
+
+| Variable | Purpose |
+|----------|---------|
+| `OPENROUTER_API_KEY` | OpenRouter key (default provider) |
+| `OPENAI_API_KEY` | OpenAI key (or legacy `OPENAI_AI_COUNCIL_KEY`) |
+| `OPENROUTER_MODEL` / `OPENAI_MODEL` | Optional default model override |
+
+See **[BRAINSTORM.md](BRAINSTORM.md)** for a full analysis of the codebase and the
+roadmap of further improvements (multi-judge panels, RAG over member documents,
+async fan-out, a web UI, etc.). The original design write-up is preserved below.
+
+---
+
 # Idea Generation Methodology
 ## Background and Design
 Large Large Models (LLMs) are a useful tool for idea generation, debate and evaluation. They are able to discuss an impossibly large range of topics compared to the average knowledge-base of their human counterparts. According to Girotra et al. (2023), “Two hundred ideas can be generated by one human interacting with ChatGPT-4 in about 15 minutes. A human working alone can generate about five ideas in 15 minutes.” Moreover, in that study, 35 of the top 40 ideas had been generated by ChatGPT-4. While the most novel ideas in the top 40 were those produced by humans, this disparity in quality of ideas cannot be ignored, nor the speed of generation. 
