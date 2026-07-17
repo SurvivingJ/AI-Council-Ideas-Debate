@@ -149,6 +149,59 @@ def render_result(res: dict) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Rendering a sensitivity-analysis result
+# --------------------------------------------------------------------------- #
+def render_sensitivity(res: dict) -> None:
+    st.subheader("🔬 Wording-sensitivity analysis")
+    st.caption(f"Original topic: {res.get('original_topic', '')}")
+    neu = res.get("neutralization") or {}
+    if neu.get("neutral_topic"):
+        st.caption(f"Neutral baseline: {neu['neutral_topic']}")
+
+    a = res.get("analysis", {}) or {}
+    lex, frm = a.get("lexical_robustness", {}), a.get("framing_sensitivity", {})
+    u = res.get("usage", {}) or {}
+    cost = u.get("estimated_cost_usd") or 0
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Lexical robustness", lex.get("label", "—"),
+              help="Winner stability across paraphrases — should be HIGH.")
+    c2.metric("Framing sensitivity", frm.get("label", "—"),
+              help="How much the winner shifts across deliberate reframes.")
+    c3.metric("Est. cost", f"${cost:.4f}" if cost else "n/a")
+
+    if frm.get("label") == "HIGH":
+        st.warning("⚠️ The recommendation depends heavily on how the question is framed.")
+    if lex.get("label") == "LOW":
+        st.warning("⚠️ The winner shifts under mere rewording — treat the result as noisy.")
+    st.caption(
+        f"Similarity via {a.get('similarity_method', '?')}. Lexical robustness "
+        "compares paraphrases (should be stable — instability is noise); framing "
+        "sensitivity compares reframes (divergence is a genuine finding)."
+    )
+
+    runs = res.get("runs", []) or []
+    rows = []
+    for r in runs:
+        lab = r["kind"] + (f"/{r['frame']}" if r.get("frame") else "")
+        rows.append({"wording": f"{lab}: {r['wording'][:38]}",
+                     "verdict": r.get("verdict_score") or 0})
+    if rows:
+        st.altair_chart(bar_chart(pd.DataFrame(rows), "wording", "verdict",
+                                  "verdict (1–10)", vmax=10),
+                        use_container_width=True, theme=None)
+
+    st.dataframe(pd.DataFrame([
+        {"kind": r["kind"], "frame": r.get("frame", ""),
+         "verdict": r.get("verdict_score"), "best idea": r.get("best_idea", "")[:90],
+         "wording": r["wording"]} for r in runs]),
+        use_container_width=True, hide_index=True)
+
+    st.download_button("⬇️ Download sensitivity.json",
+                       json.dumps(res, indent=2, ensure_ascii=False),
+                       file_name="sensitivity.json", mime="application/json")
+
+
+# --------------------------------------------------------------------------- #
 # Sidebar — configure & launch a run
 # --------------------------------------------------------------------------- #
 def read_tags() -> list[str]:
@@ -204,14 +257,22 @@ def sidebar() -> RunConfig | None:
         cards = st.checkbox("Knowledge cards", value=True)
         cache = st.checkbox("Use response cache", value=True)
 
-    run = st.sidebar.button("▶ Run council", type="primary", use_container_width=True)
+    with st.sidebar.expander("Wording-sensitivity analysis"):
+        st.caption("Run the council across several wordings (baseline + "
+                   "paraphrases + reframes) to test how framing-dependent the "
+                   "answer is. Costs one full run per wording.")
+        sensitivity_mode = st.checkbox("Enable sensitivity analysis", value=False)
+        paraphrases = st.slider("Paraphrases", 0, 4, 2)
+        reframes = st.slider("Reframes", 0, 4, 2)
+
+    label = "▶ Run sensitivity" if sensitivity_mode else "▶ Run council"
+    run = st.sidebar.button(label, type="primary", use_container_width=True)
 
     st.sidebar.divider()
-    up = st.sidebar.file_uploader("…or load a results.json", type="json")
+    up = st.sidebar.file_uploader("…or load a results/sensitivity JSON", type="json")
     if up is not None:
         try:
             st.session_state["result"] = json.load(up)
-            st.session_state["log"] = None
         except json.JSONDecodeError:
             st.sidebar.error("Not valid JSON.")
 
@@ -220,7 +281,7 @@ def sidebar() -> RunConfig | None:
     if not topic.strip():
         st.sidebar.error("Enter a topic first.")
         return None
-    return RunConfig(
+    cfg = RunConfig(
         topic=topic.strip(), tags=tags, require_all=require_all,
         ideas_to_evaluate=ideas, provider=provider, model=model or None,
         judges=judges, rounds=rounds, closing=closing,
@@ -228,30 +289,28 @@ def sidebar() -> RunConfig | None:
         neutralize=neutralize, concurrency=concurrency, dedupe=dedupe,
         cache=cache, rag=rag, rag_k=rag_k, cards=cards, weights=weights,
     )
+    return {"kind": "sensitivity" if sensitivity_mode else "council", "cfg": cfg,
+            "paraphrases": paraphrases, "reframes": reframes}
 
 
-def run_council(cfg: RunConfig) -> None:
-    """Run the council in a background thread, streaming live progress.
-
-    The worker thread only pushes progress events onto a queue and never touches
-    Streamlit; the main thread drains the queue and updates the widgets, so this
-    is safe despite the council's internal thread pool.
+def _run_streaming(worker, label: str) -> None:
+    """Run ``worker(q, holder)`` in a background thread and drain its progress
+    events into a live status panel. The worker only pushes events onto the
+    queue and never touches Streamlit; only this (main) thread updates widgets.
     """
     q: queue.Queue = queue.Queue()
     holder: dict = {}
 
-    def worker() -> None:
+    def wrapped() -> None:
         try:
-            holder["result"] = Council(
-                cfg, progress_cb=lambda ev: q.put(ev)
-            ).run_session(write=False)
+            worker(q, holder)
             q.put({"type": "done"})
         except Exception as err:  # noqa: BLE001 - report config/API errors in UI
             q.put({"type": "error", "msg": str(err)})
 
-    threading.Thread(target=worker, daemon=True).start()
+    threading.Thread(target=wrapped, daemon=True).start()
 
-    with st.status("Convening the council…", expanded=True) as status:
+    with st.status(label, expanded=True) as status:
         bar = st.progress(0.0)
         line = st.empty()
         while True:
@@ -262,7 +321,7 @@ def run_council(cfg: RunConfig) -> None:
                 status.update(label=ev["msg"])
             elif ev["type"] == "done":
                 bar.progress(1.0)
-                status.update(label="Council finished", state="complete", expanded=False)
+                status.update(label="Finished", state="complete", expanded=False)
                 break
             else:  # error
                 status.update(label="Run failed", state="error")
@@ -271,19 +330,39 @@ def run_council(cfg: RunConfig) -> None:
     st.session_state["result"] = holder.get("result")
 
 
-def main() -> None:
-    cfg = sidebar()
-    if cfg is not None:
-        run_council(cfg)
+def run_council(cfg: RunConfig) -> None:
+    def worker(q, holder):
+        holder["result"] = Council(cfg, progress_cb=q.put).run_session(write=False)
+    _run_streaming(worker, "Convening the council…")
 
-    if st.session_state.get("result"):
-        render_result(st.session_state["result"])
+
+def run_sensitivity_ui(cfg: RunConfig, paraphrases: int, reframes: int) -> None:
+    def worker(q, holder):
+        from sensitivity import run_sensitivity
+        holder["result"] = run_sensitivity(
+            cfg, paraphrases, reframes, output="sensitivity.json", progress_cb=q.put)
+    _run_streaming(worker, "Running wording-sensitivity analysis…")
+
+
+def main() -> None:
+    action = sidebar()
+    if action is not None:
+        if action["kind"] == "sensitivity":
+            run_sensitivity_ui(action["cfg"], action["paraphrases"], action["reframes"])
+        else:
+            run_council(action["cfg"])
+
+    res = st.session_state.get("result")
+    if res and res.get("analysis") and res.get("runs"):
+        render_sensitivity(res)
+    elif res:
+        render_result(res)
     else:
         st.title("🏛️ AI Council")
         st.markdown(
             "Generate, debate and evaluate ideas with a council of historical "
             "thinkers. **Configure a run in the sidebar and press ▶ Run council**, "
-            "or upload a previous `results.json` to browse it."
+            "or upload a previous `results.json` / `sensitivity.json` to browse it."
         )
         st.info("Tip: filter the roster by tags (e.g. *economics*, *history*, "
                 "*technology*) and re-weight the idea rubric to match what you care about.")

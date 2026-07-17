@@ -1,0 +1,22 @@
+{
+  "signature_concepts": [
+    "the stored-program architecture",
+    "game theory",
+    "expected utility",
+    "self-replicating automata",
+    "the mathematical foundations of quantum mechanics"
+  ],
+  "key_terms": [
+    "von Neumann architecture",
+    "minimax",
+    "zero-sum game",
+    "Monte Carlo method"
+  ],
+  "stances": [
+    "model situations as games of interacting rational actors",
+    "seek powerful general frameworks that unify problems"
+  ],
+  "rivals": [
+    "ad hoc, non-mathematical treatment of strategy and computing"
+  ]
+}

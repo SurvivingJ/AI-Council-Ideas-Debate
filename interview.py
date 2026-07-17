@@ -88,14 +88,70 @@ def persona_history(name: str, seed: str) -> list[dict]:
 
 def ask_persona(client: LLMClient, history: list[dict], question: str,
                 transcript: list[dict], kind: str) -> str:
-    """Ask the in-character persona a question, keeping conversation memory."""
+    """Ask the in-character persona a question, keeping conversation memory.
+
+    Streams the answer to the console token-by-token."""
     history.append({"role": "user", "content": question})
-    answer = client.chat(history, temperature=0.85)
+    tag = "" if kind == "base" else f" [{kind}]"
+    print(f"\nQ{tag}. {question}\n> ", end="", flush=True)
+    answer = client.chat_stream(
+        history, on_token=lambda d: print(d, end="", flush=True), temperature=0.85
+    )
+    print()
     history.append({"role": "assistant", "content": answer})
     transcript.append({"q": question, "a": answer, "kind": kind})
-    tag = "" if kind == "base" else f" [{kind}]"
-    print(f"\nQ{tag}. {question}\n> {answer}")
     return answer
+
+
+def consistency_check(client: LLMClient, name: str, instructions: str, n: int) -> dict:
+    """Sanity-check a synthesised persona: ask factual/positional questions,
+    answer them *as the persona brief*, and have a judge rate how well each
+    answer matches the real figure (0-1). Returns an average score + details."""
+    raw = client.chat(
+        [
+            {"role": "system", "content": (
+                "You write factual check questions to test whether a persona "
+                "matches a real thinker's known views.")},
+            {"role": "user", "content": (
+                f"Write {n} questions about {name}'s well-established views or "
+                'methods. Return JSON {"questions": ["...", ...]}.')},
+        ],
+        temperature=0.5, response_format={"type": "json_object"},
+    )
+    try:
+        questions = list(json.loads(raw)["questions"])[:n]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        questions = []
+
+    items = []
+    for q in questions:
+        answer = client.chat(
+            [{"role": "system", "content": instructions},
+             {"role": "user", "content": q}],
+            temperature=0.4,
+        )
+        judged = client.chat(
+            [
+                {"role": "system", "content": (
+                    f"You judge whether an answer is consistent with, and "
+                    f"accurate for, the real {name}.")},
+                {"role": "user", "content": (
+                    f"Question: {q}\nAnswer: {answer}\n\nRate 0.0-1.0 how "
+                    f"consistent and accurate this is for {name}. Return JSON "
+                    '{"score": <0.0-1.0>, "note": "<short>"}.')},
+            ],
+            temperature=0.1, response_format={"type": "json_object"},
+        )
+        try:
+            d = json.loads(judged)
+            score = float(d.get("score", 0.5))
+            note = str(d.get("note", "")).strip()
+        except (json.JSONDecodeError, TypeError, ValueError):
+            score, note = 0.5, ""
+        items.append({"q": q, "a": answer, "score": score, "note": note})
+
+    avg = round(sum(i["score"] for i in items) / len(items), 2) if items else 0.0
+    return {"score": avg, "items": items}
 
 
 def _convo(transcript: list[dict]) -> str:
@@ -219,6 +275,8 @@ def main() -> None:
                     help="Follow-up questions probing the weakest prior answers.")
     ap.add_argument("--adversarial", type=int, default=2,
                     help="Adversarial questions the figure must defend against.")
+    ap.add_argument("--consistency", type=int, default=0,
+                    help="Run N self-consistency check questions on the result.")
     ap.add_argument("--provider", default="openrouter", choices=["openrouter", "openai"])
     ap.add_argument("--model", default=None)
     ap.add_argument(
@@ -241,6 +299,14 @@ def main() -> None:
     print(persona["instructions"])
     print(f"\nSuggested tags (info.txt): {persona['tags']}")
     print("=" * 60)
+
+    if args.consistency > 0:
+        print("\nSelf-consistency check…")
+        chk = consistency_check(client, args.name, persona["instructions"], args.consistency)
+        print(f"Consistency score: {chk['score']:.2f}/1.0 "
+              "(1.0 = fully in character and accurate)")
+        for it in chk["items"]:
+            print(f"  [{it['score']:.2f}] {it['q']}")
 
     if args.write:
         folder = save_persona(args.name, persona)

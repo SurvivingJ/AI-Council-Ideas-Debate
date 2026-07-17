@@ -162,8 +162,10 @@ The original `openaicouncil.py` is a single-file CLI that:
   concrete; `--adversarial` poses objections channelling the figure's real
   critics that the persona must defend against — all in one continuous
   in-character conversation, deepening the transcript before synthesis.
-- **Self-consistency check.** After building a persona, run a few sanity
-  questions and have a judge rate how well answers match the known figure.
+- **[done] Self-consistency check** (`interview.py --consistency N`). After
+  synthesising a persona, ask factual/positional check questions, answer them as
+  the generated brief, and have a judge rate each 0-1 for how well it matches the
+  real figure; reports an average.
 - **[done] Persona knowledge cards** (`cards.py`, `council.load_card`). Each member
   can carry a `card.json` (signature concepts, characteristic vocabulary,
   stances, intellectual rivals — no fabricated quotes) injected as compact
@@ -196,10 +198,15 @@ The original `openaicouncil.py` is a single-file CLI that:
   winner marked by label not colour).
 - **[done] Streaming progress** — a live `st.status` panel streams each phase
   (indexing, gathering ideas, debating member-by-member, scoring, verdicts) via a
-  `Council` `progress_cb` drained on the main thread. (Streaming the argument
-  *text* token-by-token is still a further step.)
-- **Interactive member/tag picker** (checkbox list from `master_tags.txt`) instead
-  of numeric console prompts.
+  `Council` `progress_cb` drained on the main thread. Token-level streaming
+  (`LLMClient.chat_stream`) is wired into `interview.py`, which streams the
+  persona's answers to the console as they generate.
+- **[done] Sensitivity-analysis view** — the UI auto-detects and renders a
+  `sensitivity.json` (robustness/framing labels, per-wording verdict chart and
+  comparison table) and can run a wording-sensitivity analysis from a sidebar
+  toggle with the same live streaming panel.
+- **[done] Interactive member/tag picker** — the sidebar filters the roster by
+  tags with a live matching-member count (replaces the numeric console prompts).
 - **Shareable result pages** and export to PDF/Markdown.
 - **"Add a member" flow** that calls `interview.py` from the UI and previews the
   generated persona before saving.
@@ -220,13 +227,15 @@ The original `openaicouncil.py` is a single-file CLI that:
 The result-quality bundle (multi-judge panel, direct idea verdict, seed), the
 full Tier 2 practicality bundle (concurrency, de-dup, caching, cost accounting),
 RAG over member corpora, the weighted multi-axis rubric, and the Streamlit web
-UI are **done**. Remaining high-value work, in order:
+UI (with a sensitivity-analysis view, run + browse), the weighted multi-axis
+rubric, knowledge cards (full roster) and the persona self-consistency check are
+**done**. Remaining high-value work, in order:
 
-1. A sensitivity-analysis view in the UI (there is already a `sensitivity.json`).
-2. Token-level streaming of argument text in the UI.
-3. Generate `card.json` for the rest of the roster (run `cards.py --all`) and
-   add real primary texts for the curated members (drop into their `Files/`).
-4. Self-consistency check for generated personas.
+1. Token-level streaming of *argument* text in the council UI (interview.py
+   already streams; the council's parallel fan-out makes this the harder case).
+2. Add real primary texts for the curated members (drop into their `Files/`).
+3. Shareable/exportable result pages (PDF/Markdown from `results.json`).
+4. Cross-run leaderboard of which members win most and which judges are harshest.
 
 **[done] Live streaming progress in the UI** — `Council` accepts a `progress_cb`
 that emits fraction+message events at each phase (index → gather → dedupe →

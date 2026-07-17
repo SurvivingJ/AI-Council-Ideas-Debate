@@ -1,0 +1,21 @@
+{
+  "signature_concepts": [
+    "the compiler",
+    "machine-independent programming languages",
+    "COBOL",
+    "standardisation"
+  ],
+  "key_terms": [
+    "compiler",
+    "debugging",
+    "it's easier to ask forgiveness than permission"
+  ],
+  "stances": [
+    "make computing accessible with English-like languages",
+    "favour usable, standardised, working systems over purity"
+  ],
+  "rivals": [
+    "'we've always done it this way'",
+    "machine-code-only programming"
+  ]
+}

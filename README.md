@@ -24,6 +24,11 @@ debate transcript, de-duplication and retrieval details, and a usage/cost
 summary. You can also upload a previous `results.json` to browse it without
 re-running, and download results back out.
 
+The sidebar's **Wording-sensitivity analysis** toggle runs the council across a
+neutral baseline plus paraphrases and reframes (one full run per wording) and
+renders the robustness/framing labels, a per-wording verdict chart and
+comparison table — or upload a previous `sensitivity.json` to browse it.
+
 ## Quickstart (new `council.py`)
 
 The modern entry point is `council.py`. It talks to the **OpenAI-compatible Chat
@@ -133,11 +138,11 @@ Each member can carry a `card.json` — a compact, always-on distillation of the
 **signature concepts, characteristic vocabulary, positions, and intellectual
 rivals** — injected into their system prompt so they argue recognisably like
 themselves (distinct from RAG, which retrieves query-relevant passages per turn).
-Iconic members ship with hand-written cards; generate the rest with `cards.py`:
+**All members ship with a card**; regenerate or add more with `cards.py`:
 
 ```bash
-python cards.py "JosephSchumpeter" --write      # one member
-python cards.py --all --write                    # every member missing a card
+python cards.py "JosephSchumpeter" --write --overwrite   # one member
+python cards.py --all --write                             # any member missing a card
 ```
 
 Cards contain no fabricated quotations — only real concepts and terms of art.
@@ -153,8 +158,12 @@ defend against questions channelling their real critics:
 
 ```bash
 python interview.py "Joseph Schumpeter" --write
-python interview.py "Ada Lovelace" --followups 3 --adversarial 3 --write
+python interview.py "Ada Lovelace" --followups 3 --adversarial 3 --consistency 4 --write
 ```
+
+Answers **stream to the console** token-by-token, and `--consistency N` runs a
+self-check on the generated persona (factual questions answered as the brief,
+scored 0–1 by a judge for how well they match the real figure).
 
 ### Configuration
 

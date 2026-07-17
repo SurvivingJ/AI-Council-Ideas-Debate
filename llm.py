@@ -224,6 +224,14 @@ class LLMClient:
             )
         return OpenAI(api_key=api_key)
 
+    def _chat_kwargs(self, messages, temp, response_format) -> dict:
+        kwargs: dict = {"model": self.model, "messages": messages, "temperature": temp}
+        if response_format is not None:
+            kwargs["response_format"] = response_format
+        if self.config.seed is not None:
+            kwargs["seed"] = self.config.seed
+        return kwargs
+
     def chat(
         self,
         messages: list[dict],
@@ -232,15 +240,7 @@ class LLMClient:
     ) -> str:
         """Send a chat completion request with basic exponential backoff."""
         temp = self.config.temperature if temperature is None else temperature
-        kwargs: dict = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temp,
-        }
-        if response_format is not None:
-            kwargs["response_format"] = response_format
-        if self.config.seed is not None:
-            kwargs["seed"] = self.config.seed
+        kwargs = self._chat_kwargs(messages, temp, response_format)
 
         cache_key = self._cache.key({"kind": "chat", **kwargs})
         cached = self._cache.get(cache_key)
@@ -268,6 +268,38 @@ class LLMClient:
                 time.sleep(delay)
                 delay *= 2
         raise RuntimeError(f"LLM request failed after retries: {last_err}")
+
+    def chat_stream(self, messages: list[dict], on_token, temperature: float | None = None) -> str:
+        """Stream a chat completion, invoking ``on_token(delta)`` for each chunk
+        and returning the full text. Shares the cache with ``chat`` (a cached
+        reply is emitted once via ``on_token``). No retry mid-stream."""
+        temp = self.config.temperature if temperature is None else temperature
+        kwargs = self._chat_kwargs(messages, temp, None)
+
+        cache_key = self._cache.key({"kind": "chat", **kwargs})
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            with self._usage_lock:
+                self._usage["cache_hits"] += 1
+            on_token(cached)
+            return cached
+
+        parts: list[str] = []
+        stream = self.client.chat.completions.create(
+            stream=True, stream_options={"include_usage": True}, **kwargs
+        )
+        for chunk in stream:
+            if getattr(chunk, "usage", None):
+                self._record_usage(chunk, self.model)
+            if not chunk.choices:
+                continue
+            delta = getattr(chunk.choices[0].delta, "content", None)
+            if delta:
+                parts.append(delta)
+                on_token(delta)
+        content = "".join(parts).strip()
+        self._cache.set(cache_key, content)
+        return content
 
     def embed(self, texts: list[str], model: str | None = None) -> list[list[float]]:
         """Embed a list of texts. May raise if the provider/model lacks embedding

@@ -63,16 +63,19 @@ def _label(value: float, high: float, medium: float, invert: bool = False) -> st
 # Orchestration
 # --------------------------------------------------------------------------- #
 def run_sensitivity(
-    base: RunConfig, n_paraphrase: int, n_reframe: int, output: str
+    base: RunConfig, n_paraphrase: int, n_reframe: int, output: str, progress_cb=None
 ) -> dict:
+    emit = progress_cb or (lambda ev: None)
     client = LLMClient(
         LLMConfig(provider=base.provider, model=base.model, seed=base.seed, cache=base.cache)
     )
 
+    emit({"type": "progress", "frac": 0.02, "msg": "Neutralising topic…"})
     print("Neutralising topic...")
     neutral = neutralize_topic(client, base.topic)
     print(f"  baseline (neutral): {neutral.neutral_topic}")
 
+    emit({"type": "progress", "frac": 0.06, "msg": "Generating wording variants…"})
     print("Generating wording variants...")
     variants = generate_variants(client, neutral.neutral_topic, n_paraphrase, n_reframe)
     wordings: list[Variant] = [
@@ -85,7 +88,10 @@ def run_sensitivity(
     # the exact wording here).
     runs = []
     usages = []
-    for v in wordings:
+    total = len(wordings)
+    for i, v in enumerate(wordings):
+        emit({"type": "progress", "frac": 0.1 + 0.85 * i / total,
+              "msg": f"Council {i + 1}/{total} on [{v.kind}]: {v.text[:40]}"})
         print(f"\n{'#' * 60}\n# Running council on [{v.kind}]: {v.text}\n{'#' * 60}")
         cfg = dataclasses.replace(base, topic=v.text, neutralize=False)
         result = Council(cfg).run_session(write=False)
@@ -101,6 +107,7 @@ def run_sensitivity(
             }
         )
 
+    emit({"type": "progress", "frac": 0.96, "msg": "Comparing wordings…"})
     report = _compare(runs, client)
     total_usage = _sum_usage([client.usage_summary(), *usages])
     out = {
