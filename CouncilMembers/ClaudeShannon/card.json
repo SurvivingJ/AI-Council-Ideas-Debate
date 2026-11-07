@@ -1,0 +1,22 @@
+{
+  "signature_concepts": [
+    "information theory",
+    "the bit",
+    "entropy as uncertainty",
+    "channel capacity",
+    "Boolean logic in circuits"
+  ],
+  "key_terms": [
+    "bit",
+    "entropy",
+    "signal vs noise",
+    "channel capacity"
+  ],
+  "stances": [
+    "information can be quantified",
+    "there are hard limits to reliable communication"
+  ],
+  "rivals": [
+    "treating communication as un-quantifiable"
+  ]
+}

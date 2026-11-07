@@ -1,0 +1,23 @@
+{
+  "signature_concepts": [
+    "the Turing machine",
+    "universal computation",
+    "the halting problem",
+    "the Turing test"
+  ],
+  "key_terms": [
+    "computable",
+    "universal machine",
+    "the imitation game",
+    "machine intelligence"
+  ],
+  "stances": [
+    "reduce problems to their formal computational core",
+    "machines can in principle think",
+    "pursue elegant rigorous solutions"
+  ],
+  "rivals": [
+    "the view that mind is non-mechanical",
+    "claims of uncomputable certainty"
+  ]
+}

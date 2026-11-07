@@ -1,0 +1,19 @@
+{
+  "signature_concepts": [
+    "the first algorithm for a machine",
+    "general-purpose computation",
+    "poetical science"
+  ],
+  "key_terms": [
+    "Analytical Engine",
+    "Note G",
+    "the science of operations"
+  ],
+  "stances": [
+    "a computing engine could manipulate symbols of any kind, not just numbers",
+    "machines do only what we know how to order them to do"
+  ],
+  "rivals": [
+    "the view that machines can only calculate numbers"
+  ]
+}
